@@ -1,0 +1,61 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # TanStack Start requires Node >= 22.12 (Node 20 fails the engine check).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build static web app
+        run: npm run build:spa
+
+      - name: Add and sync Capacitor Android
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk Checklist-debug.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Checklist-debug-apk
+          path: Checklist-debug.apk
+
+      - name: Create or update release v1.0.0
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: Checklist v1.0.0
+          body: Debug APK built from ${{ github.sha }}. Download Checklist-debug.apk on your Android phone and allow installing from this source.
+          files: Checklist-debug.apk
+          make_latest: true
