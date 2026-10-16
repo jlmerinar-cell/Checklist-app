@@ -30,10 +30,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Baked into the static app. Repository secrets only — never commit the values.
+      # Empty secrets leave the Command box with a clear "not set up" message.
       - name: Build static web app
         env:
           # Public OAuth client id. The browser token flow does not use a client secret.
           VITE_GOOGLE_CLIENT_ID: "84319457158-nr9sm2i9v3l9plrbabbe2okod8c771be.apps.googleusercontent.com"
+          # Calendar hook. Repository secrets only — never commit the values.
+          # Empty secrets leave the Command box with a clear "not set up" message.
+          VITE_CALENDAR_HOOK_URL: ${{ secrets.VITE_CALENDAR_HOOK_URL }}
+          VITE_CALENDAR_HOOK_TOKEN: ${{ secrets.VITE_CALENDAR_HOOK_TOKEN }}
         run: npm run build:spa
 
       - name: Confirm Google client ID is in the SPA bundle
