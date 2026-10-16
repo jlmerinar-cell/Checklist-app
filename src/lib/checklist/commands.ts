@@ -22,6 +22,8 @@ import {
   switchTab,
   toggleCheckbox,
 } from "./actions";
+import { postCalendarEvent } from "./calendar-hook";
+import { parseCalendarPhrase } from "./calendar-phrase";
 import { findList } from "./resolve";
 import { getSnapshot, setStatus } from "./storage";
 import type { ActionResult, List } from "./types";
@@ -46,16 +48,29 @@ const HELP = [
   "checklist download",
   "checklist import <json>",
   "checklist connect-calendar",
+  "add <event> <when>   e.g. add dentist Friday 2pm",
+  "schedule <event> <when>",
+  "calendar <event> <when>",
 ].join("\n");
 
-function splitList(tokens: string[], allowEmptyRest: boolean): { list: List | null; rest: string[]; error?: string } {
+function splitList(
+  tokens: string[],
+  allowEmptyRest: boolean,
+): { list: List | null; rest: string[]; error?: string; ambiguous?: boolean } {
   if (!tokens.length) return { list: null, rest: [], error: "Name the list." };
   const lists = getSnapshot().lists;
   const max = allowEmptyRest ? tokens.length : Math.max(tokens.length - 1, 1);
   for (let count = max; count >= 1; count -= 1) {
     const candidate = tokens.slice(0, count).join(" ");
     const found = findList(lists, candidate);
-    if (found.ambiguous) return { list: null, rest: tokens, error: `More than one list matches “${candidate}”.` };
+    if (found.ambiguous) {
+      return {
+        list: null,
+        rest: tokens,
+        error: `More than one list matches “${candidate}”.`,
+        ambiguous: true,
+      };
+    }
     if (found.list) return { list: found.list, rest: tokens.slice(count) };
   }
   return { list: null, rest: tokens, error: "No list matches that name." };
@@ -64,6 +79,17 @@ function splitList(tokens: string[], allowEmptyRest: boolean): { list: List | nu
 function fail(message: string): ActionResult {
   setStatus({ message });
   return { ok: false, message };
+}
+
+/**
+ * Calendar only when the line did not already match a checklist command.
+ * A real "checklist add <list> <task>" returns before this runs.
+ */
+function calendarFromPhrase(input: string): ActionResult | Promise<ActionResult> | null {
+  const parsed = parseCalendarPhrase(input);
+  if (parsed.ok) return postCalendarEvent(parsed);
+  if (parsed.reason === "no-title") return fail("Name the event. Try add dentist Friday 2pm.");
+  return null;
 }
 
 export function exec(input: string): ActionResult | Promise<ActionResult> {
@@ -97,8 +123,16 @@ export function exec(input: string): ActionResult | Promise<ActionResult> {
 
   if (verb === "add") {
     const split = splitList(tokens, false);
-    if (!split.list) return fail(split.error ?? "Name the list and the task.");
-    return addTask(split.list.slug, split.rest.join(" "));
+    if (split.list) return addTask(split.list.slug, split.rest.join(" "));
+    if (!split.ambiguous) {
+      const calendar = calendarFromPhrase(trimmed);
+      if (calendar) return calendar;
+    }
+    return fail(split.error ?? "Name the list and the task.");
+  }
+
+  if (verb === "schedule" || verb === "calendar") {
+    return calendarFromPhrase(trimmed) ?? fail("Add a time. Try add dentist Friday 2pm.");
   }
 
   if (verb === "switch" || verb === "open") {
@@ -127,7 +161,16 @@ export function exec(input: string): ActionResult | Promise<ActionResult> {
     return renameList(split.list.slug, tokens.slice(marker + 1).join(" "));
   }
 
-  const taskVerbs = new Set(["check", "uncheck", "toggle", "edit", "notes", "save", "due", "clear-due"]);
+  const taskVerbs = new Set([
+    "check",
+    "uncheck",
+    "toggle",
+    "edit",
+    "notes",
+    "save",
+    "due",
+    "clear-due",
+  ]);
   if (!taskVerbs.has(verb)) return fail("Unknown command. Try checklist help.");
 
   if (verb === "edit") {

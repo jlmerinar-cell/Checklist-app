@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # App unit tests. The scripts/*.test.mjs suite reads gitignored .grok
+      # template files that are not in this repository snapshot.
+      - name: Test
+        run: |
+          node --experimental-strip-types --test \
+            src/lib/app-data/app-data.test.ts \
+            src/lib/app-data/readiness-schedule.test.ts \
+            src/lib/auth/gate-identity.test.ts \
+            src/lib/auth/sign-in-gate.test.ts \
+            src/lib/preview-path-prefix.test.ts
+          node --experimental-strip-types --import ./scripts/register-ts-ext.mjs --test \
+            src/lib/checklist/calendar-phrase.test.ts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build

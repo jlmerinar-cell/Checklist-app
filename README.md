@@ -19,7 +19,11 @@ Optional environment variables, in a `.env` file or your shell. Vite only expose
 VITE_GOOGLE_CLIENT_ID=
 VITE_SUPABASE_URL=
 VITE_SUPABASE_ANON_KEY=
+VITE_CALENDAR_HOOK_URL=
+VITE_CALENDAR_HOOK_TOKEN=
 ```
+
+The two calendar hook variables are how the Command box creates an event. Leave them empty until the Apps Script below is deployed. Do not commit the token.
 
 Restart the dev server after changing them.
 
@@ -85,10 +89,71 @@ checklist.downloadLists()
 | `checklist daily off` | Stop the morning fill |
 | `checklist share <list>` | Invite link for that list only |
 | `checklist download` | Save every list as a JSON file |
-| `checklist connect-calendar` | Google sign-in |
+| `checklist connect-calendar` | Google sign-in (due dates and Daily) |
+| `add <event> <when>` | Google Calendar event, for example `add dentist Friday 2pm` |
+| `schedule <event> <when>` | Same, and it never matches a list name |
+| `calendar <event> <when>` | Same |
 | `checklist help` | This list |
 
-There is also a Command box at the bottom of the screen.
+There is also a Command box at the bottom of the screen. Type a command and tap **Run**. The line under the button is the result.
+
+## Add an event from the Command box
+
+This path does not use Google sign-in inside the app. The Android WebView blocks that login page. A Google Apps Script web app, running as you, creates the event on your default calendar. The phone only sends the title and the times.
+
+Phrases that start with `add`, `schedule`, or `calendar` and include a time become a one-hour event (longer if you name the end, as in `Friday 2pm to 4pm`):
+
+```text
+add dentist appointment Friday 2pm
+schedule tomorrow 9am standup
+calendar lunch Friday 12pm
+```
+
+`checklist add <list> <task>` is unchanged. If the words after `add` match a list, it is still a checklist task. Use `schedule` or `calendar` when you want an event anyway.
+
+The result or the error shows on the status line under **Run**. If the URL or token is missing, that line says the calendar hook is not set up.
+
+### 1. Create the Apps Script (on a computer)
+
+1. Open [script.google.com](https://script.google.com) while signed in to the Google account whose calendar should receive the events. Create a new project.
+2. Replace the sample `Code.gs` with the file [`apps-script/Code.gs`](apps-script/Code.gs) from this repo. Save.
+3. Project Settings (the gear) → Script properties → Add script property. Property: `CAL_TOKEN`. Value: a long random string you make up. This is the shared password. Save.
+4. Deploy → New deployment → gear → **Web app**.
+   - Execute as: **Me**
+   - Who has access: **Anyone**
+5. Deploy, and allow the calendar permission when Google asks.
+6. Copy the web app URL. It ends in `/exec`.
+
+Opening that URL in a browser shows a short JSON note. That is expected. The app sends a POST.
+
+After you edit `Code.gs`, deploy a **new version** (Deploy → Manage deployments → pencil → Version: New version → Deploy). Saving the script leaves the live URL on the old code. `CAL_TOKEN` updates on the next request, so a property change does not need a new deployment.
+
+The browser request has to be CORS-safe. Apps Script does not answer a preflight, so the app sends `Content-Type: text/plain` and follows the redirect Apps Script returns. The script documents this at the top of `Code.gs`.
+
+### 2. Add the two repository secrets
+
+On GitHub, open this repo → Settings → Secrets and variables → Actions → New repository secret. Add both. Do not put the values in a commit.
+
+| Secret | Value |
+| --- | --- |
+| `VITE_CALENDAR_HOOK_URL` | The `/exec` URL |
+| `VITE_CALENDAR_HOOK_TOKEN` | The same string as `CAL_TOKEN` |
+
+The Android workflow reads those secrets when it builds the app and bakes them into the phone build. They are not stored in git.
+
+The token is inside the installed app, because the phone has to send it. Anyone with the APK can add events to that calendar. Rotate it by changing `CAL_TOKEN` and the GitHub secret, then rebuild.
+
+### 3. Rebuild and try it
+
+Push to `main`, or run the **Android APK** workflow by hand. Install the new APK. In the Command box, type `add dentist appointment Friday 2pm` and tap **Run**. The status line names the event when it lands, or shows the error from the script.
+
+On a computer, the same two variables can be set in the shell before `npm run dev`. Restart the dev server after changing them. Do not commit them.
+
+```bash
+VITE_CALENDAR_HOOK_URL='https://script.google.com/macros/s/XXXX/exec' \
+VITE_CALENDAR_HOOK_TOKEN='the-same-string-as-CAL_TOKEN' \
+npm run dev
+```
 
 ## Google Calendar (test users)
 
