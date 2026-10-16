@@ -3,6 +3,8 @@ name: Android APK
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -29,7 +31,20 @@ jobs:
         run: npm ci
 
       - name: Build static web app
+        env:
+          # Public OAuth client id. The browser token flow does not use a client secret.
+          VITE_GOOGLE_CLIENT_ID: "84319457158-nr9sm2i9v3l9plrbabbe2okod8c771be.apps.googleusercontent.com"
         run: npm run build:spa
+
+      - name: Confirm Google client ID is in the SPA bundle
+        run: |
+          set -euo pipefail
+          id="84319457158-nr9sm2i9v3l9plrbabbe2okod8c771be.apps.googleusercontent.com"
+          echo "Searching dist/**/*.js for the public client ID"
+          if ! grep -R -l -F --include='*.js' --include='*.mjs' "$id" dist; then
+            echo "VITE_GOOGLE_CLIENT_ID was not inlined into the SPA build" >&2
+            exit 1
+          fi
 
       - name: Add and sync Capacitor Android
         run: |
@@ -51,11 +66,33 @@ jobs:
           name: Checklist-debug-apk
           path: Checklist-debug.apk
 
-      - name: Create or update release v1.0.0
+      # Push to main publishes a new non-prerelease. pull_request and
+      # workflow_dispatch build the APK and stop here.
+      - name: Compute next patch tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: version
+        run: |
+          set -euo pipefail
+          git fetch --tags --force origin
+          latest="$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+          if [ -z "${latest}" ]; then
+            echo "No vMAJOR.MINOR.PATCH tag found to bump" >&2
+            exit 1
+          fi
+          IFS=. read -r major minor patch <<< "${latest#v}"
+          next="v${major}.${minor}.$((patch + 1))"
+          echo "latest=${latest}" >> "$GITHUB_OUTPUT"
+          echo "tag=${next}" >> "$GITHUB_OUTPUT"
+          echo "Bumping ${latest} -> ${next}"
+
+      - name: Publish release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0
-          name: Checklist v1.0.0
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Checklist ${{ steps.version.outputs.tag }}
           body: Debug APK built from ${{ github.sha }}. Download Checklist-debug.apk on your Android phone and allow installing from this source.
           files: Checklist-debug.apk
+          draft: false
+          prerelease: false
           make_latest: true
