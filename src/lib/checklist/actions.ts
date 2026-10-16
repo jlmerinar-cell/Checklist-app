@@ -6,7 +6,16 @@
 import { flushCalendar, connectCalendar as connectGoogle, initCalendar } from "./calendar";
 import { runDaily } from "./daily";
 import { FREE_SHARED_LIST_CAP, upgradeLimits } from "./limits";
-import { clampNotes, clampTitle, findList, findTask, isDate, nowIso, uid, uniqueSlug } from "./resolve";
+import {
+  clampNotes,
+  clampTitle,
+  findList,
+  findTask,
+  isDate,
+  nowIso,
+  uid,
+  uniqueSlug,
+} from "./resolve";
 import { inviteUrl, pullInvite, supabaseConfigured } from "./sharing";
 import * as db from "./storage";
 import type { ActionResult, List, Task, Theme } from "./types";
@@ -84,6 +93,7 @@ export function addTask(listRef: string, title: string): ActionResult {
     calendarPending: false,
     notesOpen: false,
     editing: false,
+    updatedAt: nowIso(),
   };
   db.addTask(found.list.id, task);
   db.setActive(found.list.id);
@@ -166,7 +176,8 @@ export function setDueDate(listRef: string, taskRef: string, due: string | null)
   void flushCalendar();
   if (!due) return ok(`Cleared the due date on “${found.task.title}”.`);
   const calendar = db.getSnapshot().calendar;
-  const extra = calendar === "connected" ? " Sending it to Google Calendar." : " Saved on this phone.";
+  const extra =
+    calendar === "connected" ? " Sending it to Google Calendar." : " Saved on this phone.";
   return ok(`Due ${due} on “${found.task.title}”.${extra}`);
 }
 
@@ -231,7 +242,9 @@ export async function shareList(listRef?: string): Promise<ActionResult> {
   if ("error" in target && target.error) return fail(target.error);
   const list = target.list;
   if (!list) return fail("Nothing to share yet.");
-  const sharedCount = db.getSnapshot().lists.filter((item) => item.shared && item.id !== list.id).length;
+  const sharedCount = db
+    .getSnapshot()
+    .lists.filter((item) => item.shared && item.id !== list.id).length;
   if (!list.shared && sharedCount >= FREE_SHARED_LIST_CAP) {
     return fail(upgradeLimits().message);
   }
@@ -319,7 +332,12 @@ export function importLists(json: string): ActionResult {
     if (Array.isArray(row.tasks)) {
       for (const taskItem of row.tasks) {
         if (!taskItem || typeof taskItem !== "object") continue;
-        const task = taskItem as { title?: unknown; done?: unknown; notes?: unknown; due?: unknown };
+        const task = taskItem as {
+          title?: unknown;
+          done?: unknown;
+          notes?: unknown;
+          due?: unknown;
+        };
         const title = clampTitle(String(task.title ?? "")).trim();
         if (!title) continue;
         const notes = clampNotes(String(task.notes ?? ""));
@@ -335,6 +353,7 @@ export function importLists(json: string): ActionResult {
           calendarPending: false,
           notesOpen: false,
           editing: false,
+          updatedAt: nowIso(),
         });
       }
     }

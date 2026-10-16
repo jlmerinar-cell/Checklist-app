@@ -20,6 +20,8 @@ export type Task = {
   calendarPending: boolean;
   notesOpen: boolean;
   editing: boolean;
+  /** Last committed edit. Draft notes do not move this. Last-write-wins sync uses it. */
+  updatedAt: string;
 };
 
 export type List = {

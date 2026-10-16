@@ -3,6 +3,7 @@
  * Sharing and calendar subscribe; they never keep a second copy of the lists.
  */
 
+import type { OwnerTombstone } from "./space-sync-merge";
 import { applyTheme, parseTheme } from "./themes";
 import type { CalendarState, List, RemoteList, Snapshot, SyncState, Task, Theme } from "./types";
 
@@ -11,11 +12,7 @@ export const DAILY_LIST_ID = "00000000-0000-4000-8000-0000000000da";
 
 const STAMP = "2026-01-01T00:00:00.000Z";
 
-function task(
-  id: string,
-  title: string,
-  extra?: Partial<Pick<Task, "done" | "notes">>,
-): Task {
+function task(id: string, title: string, extra?: Partial<Pick<Task, "done" | "notes">>): Task {
   return {
     id,
     title,
@@ -27,16 +24,11 @@ function task(
     calendarPending: false,
     notesOpen: false,
     editing: false,
+    updatedAt: STAMP,
   };
 }
 
-function list(
-  id: string,
-  slug: string,
-  name: string,
-  inviteToken: string,
-  tasks: Task[],
-): List {
+function list(id: string, slug: string, name: string, inviteToken: string, tasks: Task[]): List {
   return {
     id,
     slug,
@@ -110,13 +102,20 @@ function baseSnapshot(lists: List[], activeId: string | null, theme: Theme): Sna
   };
 }
 
-const SERVER_SNAPSHOT: Snapshot = baseSnapshot(SEED_LISTS, "22222222-2222-4222-8222-222222222222", "dark");
+const SERVER_SNAPSHOT: Snapshot = baseSnapshot(
+  SEED_LISTS,
+  "22222222-2222-4222-8222-222222222222",
+  "dark",
+);
 
 let snapshot: Snapshot = SERVER_SNAPSHOT;
 let hydrated = false;
 const listeners = new Set<() => void>();
 let onLocalSync: (() => void) | null = null;
+const syncNotifiers = new Set<() => void>();
 let onSharedRemove: ((inviteToken: string) => void) | null = null;
+let tombstones: OwnerTombstone[] = [];
+const TOMBSTONE_CAP = 400;
 
 export function setRemoveNotifier(fn: ((inviteToken: string) => void) | null): void {
   onSharedRemove = fn;
@@ -124,6 +123,49 @@ export function setRemoveNotifier(fn: ((inviteToken: string) => void) | null): v
 
 export function setSyncNotifier(fn: (() => void) | null): void {
   onLocalSync = fn;
+}
+
+export function addSyncNotifier(fn: () => void): () => void {
+  syncNotifiers.add(fn);
+  return () => {
+    syncNotifiers.delete(fn);
+  };
+}
+
+export function getTombstones(): OwnerTombstone[] {
+  return tombstones.map((tomb) => ({ ...tomb }));
+}
+
+function rememberTombstones(next: OwnerTombstone[]): void {
+  const ranked =
+    next.length <= TOMBSTONE_CAP
+      ? next
+      : next
+          .slice()
+          .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+          .slice(0, TOMBSTONE_CAP);
+  tombstones = ranked;
+}
+
+function noteTaskDeletes(listId: string, tasks: Task[], at: string): void {
+  if (!tasks.length) return;
+  const drop = new Set(tasks.map((task) => task.id));
+  const kept = tombstones.filter((tomb) => !(tomb.kind === "task" && drop.has(tomb.id)));
+  rememberTombstones([
+    ...kept,
+    ...tasks.map((task) => ({ kind: "task" as const, id: task.id, listId, updatedAt: at })),
+  ]);
+}
+
+function noteListDelete(list: List, at: string): void {
+  const kept = tombstones.filter((tomb) => !(tomb.kind === "list" && tomb.id === list.id));
+  rememberTombstones([...kept, { kind: "list", id: list.id, listId: null, updatedAt: at }]);
+  noteTaskDeletes(list.id, list.tasks, at);
+}
+
+function pokeOwnerSync(): void {
+  if (!hydrated) return;
+  for (const notify of syncNotifiers) notify();
 }
 
 export function subscribe(listener: () => void): () => void {
@@ -150,6 +192,7 @@ function writeLocal(next: Snapshot): void {
     activeId: next.activeId,
     theme: next.theme,
     dailyEnabled: next.dailyEnabled,
+    tombstones,
   };
   try {
     localStorage.setItem(STATE_KEY, JSON.stringify(data));
@@ -163,7 +206,10 @@ function commit(next: Snapshot, opts?: { sync?: boolean; persist?: boolean }): v
   snapshot = next;
   if (opts?.persist !== false && hydrated) writeLocal(next);
   emit();
-  if (opts?.sync && hydrated) onLocalSync?.();
+  if (opts?.sync && hydrated) {
+    onLocalSync?.();
+    for (const notify of syncNotifiers) notify();
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -171,7 +217,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseTask(value: unknown): Task | null {
-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.title !== "string") return null;
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.title !== "string")
+    return null;
   const notes = typeof value.notes === "string" ? value.notes : "";
   const due = typeof value.due === "string" ? value.due : null;
   return {
@@ -185,6 +232,7 @@ function parseTask(value: unknown): Task | null {
     calendarPending: value.calendarPending === true,
     notesOpen: value.notesOpen === true,
     editing: value.editing === false ? false : value.editing === true,
+    updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : "",
   };
 }
 
@@ -192,7 +240,11 @@ function parseList(value: unknown): List | null {
   if (!isRecord(value) || typeof value.id !== "string") return null;
   if (typeof value.slug !== "string" || typeof value.name !== "string") return null;
   if (!Array.isArray(value.tasks)) return null;
-  const tasks = value.tasks.map(parseTask).filter((item): item is Task => item !== null);
+  const listUpdatedAt = typeof value.updatedAt === "string" ? value.updatedAt : STAMP;
+  const tasks = value.tasks
+    .map(parseTask)
+    .filter((item): item is Task => item !== null)
+    .map((task) => ({ ...task, updatedAt: task.updatedAt || listUpdatedAt }));
   return {
     id: value.id,
     slug: value.slug,
@@ -203,6 +255,17 @@ function parseList(value: unknown): List | null {
     day: typeof value.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.day) ? value.day : null,
     system: value.system === true || value.slug === "daily",
     tasks,
+  };
+}
+
+function parseTombstone(value: unknown): OwnerTombstone | null {
+  if (!isRecord(value) || (value.kind !== "list" && value.kind !== "task")) return null;
+  if (typeof value.id !== "string" || typeof value.updatedAt !== "string") return null;
+  return {
+    kind: value.kind,
+    id: value.id,
+    listId: typeof value.listId === "string" ? value.listId : null,
+    updatedAt: value.updatedAt,
   };
 }
 
@@ -218,7 +281,10 @@ export function hydrate(): void {
     if (!raw) {
       snapshot = {
         ...SERVER_SNAPSHOT,
-        lists: SERVER_SNAPSHOT.lists.map((item) => ({ ...item, tasks: item.tasks.map((t) => ({ ...t })) })),
+        lists: SERVER_SNAPSHOT.lists.map((item) => ({
+          ...item,
+          tasks: item.tasks.map((t) => ({ ...t })),
+        })),
       };
       writeLocal(snapshot);
       applyTheme(snapshot.theme);
@@ -227,25 +293,41 @@ export function hydrate(): void {
     }
     const parsed = JSON.parse(raw) as unknown;
     if (!isRecord(parsed) || !Array.isArray(parsed.lists)) throw new Error("bad snapshot");
-    const lists = withDaily(parsed.lists.map(parseList).filter((item): item is List => item !== null));
+    const lists = withDaily(
+      parsed.lists.map(parseList).filter((item): item is List => item !== null),
+    );
+    tombstones = Array.isArray(parsed.tombstones)
+      ? parsed.tombstones
+          .map(parseTombstone)
+          .filter((item): item is OwnerTombstone => item !== null)
+      : [];
     const theme = parseTheme(typeof parsed.theme === "string" ? parsed.theme : "") ?? "dark";
     const activeId = typeof parsed.activeId === "string" ? parsed.activeId : (lists[0]?.id ?? null);
     snapshot = {
-      ...baseSnapshot(lists, lists.some((item) => item.id === activeId) ? activeId : (lists[0]?.id ?? null), theme),
+      ...baseSnapshot(
+        lists,
+        lists.some((item) => item.id === activeId) ? activeId : (lists[0]?.id ?? null),
+        theme,
+      ),
       dailyEnabled: parsed.dailyEnabled === true,
     };
     applyTheme(theme);
   } catch {
     snapshot = {
       ...SERVER_SNAPSHOT,
-      lists: SERVER_SNAPSHOT.lists.map((item) => ({ ...item, tasks: item.tasks.map((t) => ({ ...t })) })),
+      lists: SERVER_SNAPSHOT.lists.map((item) => ({
+        ...item,
+        tasks: item.tasks.map((t) => ({ ...t })),
+      })),
     };
     applyTheme("dark");
   }
   emit();
 }
 
-export function setStatus(partial: Partial<Pick<Snapshot, "message" | "sync" | "syncDetail" | "calendar">>): void {
+export function setStatus(
+  partial: Partial<Pick<Snapshot, "message" | "sync" | "syncDetail" | "calendar">>,
+): void {
   snapshot = { ...snapshot, ...partial };
   emit();
 }
@@ -260,12 +342,17 @@ function mapList(listId: string, fn: (list: List) => List, sync: boolean): void 
 }
 
 function mapTask(listId: string, taskId: string, fn: (task: Task) => Task, touch: boolean): void {
+  const stamped = touch ? new Date().toISOString() : null;
   mapList(
     listId,
     (list) => ({
       ...list,
-      updatedAt: touch ? new Date().toISOString() : list.updatedAt,
-      tasks: list.tasks.map((task) => (task.id === taskId ? fn(task) : task)),
+      updatedAt: stamped ?? list.updatedAt,
+      tasks: list.tasks.map((task) => {
+        if (task.id !== taskId) return task;
+        const next = fn(task);
+        return stamped ? { ...next, updatedAt: stamped } : next;
+      }),
     }),
     touch,
   );
@@ -286,15 +373,25 @@ export function setActive(listId: string): void {
 }
 
 export function insertList(list: List): void {
-  commit({ ...snapshot, lists: [...snapshot.lists, list], activeId: list.id }, { sync: list.shared });
+  commit(
+    { ...snapshot, lists: [...snapshot.lists, list], activeId: list.id },
+    { sync: list.shared },
+  );
 }
 
 export function setLists(lists: List[]): void {
+  const at = new Date().toISOString();
+  for (const existing of snapshot.lists) {
+    if (isDaily(existing)) continue;
+    if (lists.some((list) => list.id === existing.id)) continue;
+    noteListDelete(existing, at);
+  }
   const next = withDaily(lists.filter((list) => !isDaily(list)));
   const activeId = next.some((list) => list.id === snapshot.activeId)
     ? snapshot.activeId
     : (next.find((list) => !isDaily(list))?.id ?? next[0]?.id ?? null);
   commit({ ...snapshot, lists: next, activeId }, { sync: false });
+  pokeOwnerSync();
 }
 
 export function renameList(listId: string, name: string, slug: string): void {
@@ -303,6 +400,7 @@ export function renameList(listId: string, name: string, slug: string): void {
 
 export function removeList(listId: string): void {
   const existing = snapshot.lists.find((list) => list.id === listId);
+  if (existing && !isDaily(existing)) noteListDelete(existing, new Date().toISOString());
   const lists = snapshot.lists.filter((list) => list.id !== listId);
   const activeId = snapshot.activeId === listId ? (lists[0]?.id ?? null) : snapshot.activeId;
   commit({ ...snapshot, lists, activeId }, { sync: true });
@@ -318,15 +416,25 @@ export function markShared(listId: string, inviteToken: string): void {
 }
 
 export function addTask(listId: string, task: Task): void {
+  const at = new Date().toISOString();
   mapList(
     listId,
-    (list) => ({ ...list, updatedAt: new Date().toISOString(), tasks: [...list.tasks, task] }),
+    (list) => ({ ...list, updatedAt: at, tasks: [...list.tasks, { ...task, updatedAt: at }] }),
     true,
   );
 }
 
 export function editTitle(listId: string, taskId: string, title: string): void {
-  mapTask(listId, taskId, (task) => ({ ...task, title, calendarPending: task.calendarPending || Boolean(task.due || task.calendarEventId) }), true);
+  mapTask(
+    listId,
+    taskId,
+    (task) => ({
+      ...task,
+      title,
+      calendarPending: task.calendarPending || Boolean(task.due || task.calendarEventId),
+    }),
+    true,
+  );
 }
 
 export function toggleDone(listId: string, taskId: string, done?: boolean): void {
@@ -348,7 +456,8 @@ export function saveNotes(listId: string, taskId: string, notes?: string): void 
         ...task,
         notes: committed,
         notesDraft: committed,
-        calendarPending: task.calendarPending || (changed && Boolean(task.due || task.calendarEventId)),
+        calendarPending:
+          task.calendarPending || (changed && Boolean(task.due || task.calendarEventId)),
       };
     },
     true,
@@ -390,18 +499,21 @@ export function setDue(listId: string, taskId: string, due: string | null): void
   );
 }
 
-export function setCalendarResult(listId: string, taskId: string, calendarEventId: string | null, pending: boolean): void {
-  mapTask(
-    listId,
-    taskId,
-    (task) => ({ ...task, calendarEventId, calendarPending: pending }),
-    true,
-  );
+export function setCalendarResult(
+  listId: string,
+  taskId: string,
+  calendarEventId: string | null,
+  pending: boolean,
+): void {
+  mapTask(listId, taskId, (task) => ({ ...task, calendarEventId, calendarPending: pending }), true);
 }
 
 export function mergeRemote(remote: RemoteList): void {
-  const byKey = snapshot.lists.find((list) => list.id === remote.id || list.inviteToken === remote.inviteToken);
-  const local = byKey ?? (remote.slug === "daily" ? snapshot.lists.find((list) => isDaily(list)) : undefined);
+  const byKey = snapshot.lists.find(
+    (list) => list.id === remote.id || list.inviteToken === remote.inviteToken,
+  );
+  const local =
+    byKey ?? (remote.slug === "daily" ? snapshot.lists.find((list) => isDaily(list)) : undefined);
   const tasks: Task[] = remote.tasks.map((remoteTask) => {
     const previous = local?.tasks.find((task) => task.id === remoteTask.id);
     const notesDirty = previous ? previous.notesDraft !== previous.notes : false;
@@ -416,8 +528,17 @@ export function mergeRemote(remote: RemoteList): void {
       calendarPending: previous?.calendarPending ?? false,
       notesOpen: previous?.notesOpen ?? false,
       editing: previous?.editing ?? false,
+      updatedAt: remote.updatedAt,
     };
   });
+  if (local) {
+    const keep = new Set(remote.tasks.map((task) => task.id));
+    noteTaskDeletes(
+      local.id,
+      local.tasks.filter((task) => !keep.has(task.id)),
+      new Date().toISOString(),
+    );
+  }
   const daily = local ? isDaily(local) : remote.slug === "daily" || remote.id === DAILY_LIST_ID;
   const nextList: List = {
     id: daily ? DAILY_LIST_ID : remote.id,
@@ -435,6 +556,16 @@ export function mergeRemote(remote: RemoteList): void {
     : [...snapshot.lists, nextList];
   const activeId = snapshot.activeId ?? nextList.id;
   commit({ ...snapshot, lists, activeId }, { sync: false });
+  pokeOwnerSync();
+}
+
+export function replaceOwnerData(lists: List[], nextTombstones: OwnerTombstone[]): void {
+  rememberTombstones(nextTombstones);
+  const next = withDaily(lists);
+  const activeId = next.some((list) => list.id === snapshot.activeId)
+    ? snapshot.activeId
+    : (next.find((list) => !isDaily(list))?.id ?? next[0]?.id ?? null);
+  commit({ ...snapshot, lists: next, activeId }, { sync: false });
 }
 
 export function stampSync(sync: SyncState, syncDetail = ""): void {
@@ -448,7 +579,10 @@ export function stampCalendar(calendar: CalendarState): void {
 }
 
 export function setDailyEnabled(dailyEnabled: boolean): void {
-  commit({ ...snapshot, dailyEnabled, dailyError: dailyEnabled ? snapshot.dailyError : "" }, { sync: false });
+  commit(
+    { ...snapshot, dailyEnabled, dailyError: dailyEnabled ? snapshot.dailyError : "" },
+    { sync: false },
+  );
 }
 
 export function setDailyError(dailyError: string): void {
@@ -460,13 +594,24 @@ export function setDailyError(dailyError: string): void {
 export function dropStaleDaily(today: string): void {
   const daily = snapshot.lists.find((item) => isDaily(item));
   if (!daily?.day || daily.day === today) return;
+  noteTaskDeletes(daily.id, daily.tasks, new Date().toISOString());
   const lists = snapshot.lists.map((item) =>
     isDaily(item) ? { ...item, tasks: [], day: today, updatedAt: new Date().toISOString() } : item,
   );
   commit({ ...snapshot, lists }, { sync: daily.shared });
+  if (!daily.shared) pokeOwnerSync();
 }
 
 export function installDailyTasks(day: string, incoming: Task[]): void {
+  const daily = snapshot.lists.find((item) => isDaily(item));
+  if (daily?.day === day) {
+    const keep = new Set(incoming.map((task) => task.id));
+    noteTaskDeletes(
+      daily.id,
+      daily.tasks.filter((task) => !keep.has(task.id)),
+      new Date().toISOString(),
+    );
+  }
   const lists = withDaily(snapshot.lists).map((item) => {
     if (!isDaily(item)) return item;
     const same = item.day === day;
@@ -481,10 +626,20 @@ export function installDailyTasks(day: string, incoming: Task[]): void {
         notesDraft: notesDirty ? previous.notesDraft : previous.notes,
         notesOpen: previous.notesOpen,
         editing: previous.editing,
+        updatedAt: previous.updatedAt || task.updatedAt,
       };
     });
-    return { ...item, tasks, day, system: true, slug: "daily", name: "Daily", updatedAt: new Date().toISOString() };
+    return {
+      ...item,
+      tasks,
+      day,
+      system: true,
+      slug: "daily",
+      name: "Daily",
+      updatedAt: new Date().toISOString(),
+    };
   });
   const shared = lists.some((item) => isDaily(item) && item.shared);
   commit({ ...snapshot, lists, dailyError: "" }, { sync: shared });
+  if (!shared) pokeOwnerSync();
 }

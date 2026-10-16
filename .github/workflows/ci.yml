@@ -30,7 +30,8 @@ jobs:
             src/lib/auth/sign-in-gate.test.ts \
             src/lib/preview-path-prefix.test.ts
           node --experimental-strip-types --import ./scripts/register-ts-ext.mjs --test \
-            src/lib/checklist/calendar-phrase.test.ts
+            src/lib/checklist/calendar-phrase.test.ts \
+            src/lib/checklist/space-sync-merge.test.ts
 
       - name: Typecheck
         run: npm run typecheck
