@@ -10,6 +10,9 @@
 -- UPGRADE PATH: raise the caps when you leave the free tier, and switch
 -- src/lib/checklist/sharing.ts from polling to Realtime if you want
 -- push updates instead of a 5 second pull.
+--
+-- Owner sync (every list on this phone, not just shared ones) is
+-- supabase/migrations/0001_owner_sync.sql.
 
 create table if not exists public.checklist_lists (
   id uuid primary key,
@@ -68,8 +71,8 @@ declare
   existing public.checklist_lists;
   owned int;
   members int;
-  v_list_cap int := 2;
-  v_member_cap int := 3;
+  v_list_cap int := 25;
+  v_member_cap int := 10;
 begin
   if p_token is null or length(trim(p_token)) < 8 then
     return jsonb_build_object('ok', false, 'reason', 'error', 'detail', 'invite token is too short');
@@ -127,7 +130,7 @@ as $$
 declare
   existing public.checklist_lists;
   members int;
-  v_member_cap int := 3;
+  v_member_cap int := 10;
 begin
   select * into existing from public.checklist_lists where invite_token = p_token;
   if not found then

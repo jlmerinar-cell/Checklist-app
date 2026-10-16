@@ -19,11 +19,12 @@ Optional environment variables, in a `.env` file or your shell. Vite only expose
 VITE_GOOGLE_CLIENT_ID=
 VITE_SUPABASE_URL=
 VITE_SUPABASE_ANON_KEY=
+VITE_SYNC_SPACE_ID=
 VITE_CALENDAR_HOOK_URL=
 VITE_CALENDAR_HOOK_TOKEN=
 ```
 
-The two calendar hook variables are how the Command box creates an event. Leave them empty until the Apps Script below is deployed. Do not commit the token.
+Leave them empty and the phone keeps every list in this browser only. The calendar hook is how the Command box creates an event. The Supabase trio is how this phone and a computer share one copy of the lists. Do not commit the tokens.
 
 Restart the dev server after changing them.
 
@@ -56,44 +57,44 @@ checklist daily off
 Everything on screen is also a function. After the page loads, `window.checklist` is ready. A string runs the parser. Named functions hit the same storage as the buttons.
 
 ```js
-checklist("checklist add fire-dept check hydrant map")
-checklist.addTask("fire-dept", "check hydrant map")
-checklist.toggleCheckbox("fire-dept", "hydrant")
-checklist.openNotes("personal", "EMT")
-checklist.saveNotes("personal", "EMT", "Airway, breathing, circulation")
-checklist.setDueDate("fire-dept", "hydrant", "2026-10-20")
-checklist.changeTheme("pink")
-checklist.setDailyEnabled(true)
-checklist.refreshDaily()
-checklist.downloadLists()
+checklist("checklist add fire-dept check hydrant map");
+checklist.addTask("fire-dept", "check hydrant map");
+checklist.toggleCheckbox("fire-dept", "hydrant");
+checklist.openNotes("personal", "EMT");
+checklist.saveNotes("personal", "EMT", "Airway, breathing, circulation");
+checklist.setDueDate("fire-dept", "hydrant", "2026-10-20");
+checklist.changeTheme("pink");
+checklist.setDailyEnabled(true);
+checklist.refreshDaily();
+checklist.downloadLists();
 ```
 
-| Command | What it does |
-| --- | --- |
-| `checklist add <list> <task>` | Add a task. The rest of the line is the title. |
-| `checklist create <name>` | New list |
-| `checklist switch <list>` | Show that list |
-| `checklist rename <list> to <name>` | Rename |
-| `checklist delete <list>` | Delete |
-| `checklist check <list> <task>` | Check |
-| `checklist uncheck <list> <task>` | Uncheck |
-| `checklist toggle <list> <task>` | Flip the checkbox |
-| `checklist edit <list> <task> to <title>` | Change the title |
-| `checklist notes <list> <task>` | Open that row’s notes |
-| `checklist save <list> <task> :: <notes>` | Save notes |
-| `checklist due <list> <task> <YYYY-MM-DD>` | Set a due date |
-| `checklist clear-due <list> <task>` | Clear it |
-| `checklist theme <light\|dark\|contrast\|pink\|rugged>` | Theme |
-| `checklist daily on` | Fill Daily each morning |
-| `checklist daily` | Fill Daily now |
-| `checklist daily off` | Stop the morning fill |
-| `checklist share <list>` | Invite link for that list only |
-| `checklist download` | Save every list as a JSON file |
-| `checklist connect-calendar` | Google sign-in (due dates and Daily) |
-| `add <event> <when>` | Google Calendar event, for example `add dentist Friday 2pm` |
-| `schedule <event> <when>` | Same, and it never matches a list name |
-| `calendar <event> <when>` | Same |
-| `checklist help` | This list |
+| Command                                                 | What it does                                                |
+| ------------------------------------------------------- | ----------------------------------------------------------- |
+| `checklist add <list> <task>`                           | Add a task. The rest of the line is the title.              |
+| `checklist create <name>`                               | New list                                                    |
+| `checklist switch <list>`                               | Show that list                                              |
+| `checklist rename <list> to <name>`                     | Rename                                                      |
+| `checklist delete <list>`                               | Delete                                                      |
+| `checklist check <list> <task>`                         | Check                                                       |
+| `checklist uncheck <list> <task>`                       | Uncheck                                                     |
+| `checklist toggle <list> <task>`                        | Flip the checkbox                                           |
+| `checklist edit <list> <task> to <title>`               | Change the title                                            |
+| `checklist notes <list> <task>`                         | Open that row’s notes                                       |
+| `checklist save <list> <task> :: <notes>`               | Save notes                                                  |
+| `checklist due <list> <task> <YYYY-MM-DD>`              | Set a due date                                              |
+| `checklist clear-due <list> <task>`                     | Clear it                                                    |
+| `checklist theme <light\|dark\|contrast\|pink\|rugged>` | Theme                                                       |
+| `checklist daily on`                                    | Fill Daily each morning                                     |
+| `checklist daily`                                       | Fill Daily now                                              |
+| `checklist daily off`                                   | Stop the morning fill                                       |
+| `checklist share <list>`                                | Invite link for that list only                              |
+| `checklist download`                                    | Save every list as a JSON file                              |
+| `checklist connect-calendar`                            | Google sign-in (due dates and Daily)                        |
+| `add <event> <when>`                                    | Google Calendar event, for example `add dentist Friday 2pm` |
+| `schedule <event> <when>`                               | Same, and it never matches a list name                      |
+| `calendar <event> <when>`                               | Same                                                        |
+| `checklist help`                                        | This list                                                   |
 
 There is also a Command box at the bottom of the screen. Type a command and tap **Run**. The line under the button is the result.
 
@@ -134,9 +135,9 @@ The browser request has to be CORS-safe. Apps Script does not answer a preflight
 
 On GitHub, open this repo → Settings → Secrets and variables → Actions → New repository secret. Add both. Do not put the values in a commit.
 
-| Secret | Value |
-| --- | --- |
-| `VITE_CALENDAR_HOOK_URL` | The `/exec` URL |
+| Secret                     | Value                          |
+| -------------------------- | ------------------------------ |
+| `VITE_CALENDAR_HOOK_URL`   | The `/exec` URL                |
 | `VITE_CALENDAR_HOOK_TOKEN` | The same string as `CAL_TOKEN` |
 
 The Android workflow reads those secrets when it builds the app and bakes them into the phone build. They are not stored in git.
@@ -171,28 +172,67 @@ Search the code for `VERIFIED_CONSENT` in `src/lib/checklist/calendar.ts` before
 
 ## Supabase
 
+Two different uses of one project. Both are off until the env vars are set, and the app then works on this phone only.
+
+### Owner sync
+
+This copies **every** list, task, and saved note for one person. Edits on the phone go up. Edits made in Supabase (including [`scripts/remote-edit.mjs`](scripts/remote-edit.mjs)) show up on the phone. The phone pulls when it opens and when it comes back to the foreground, pushes local changes after a short pause, and listens on Supabase Realtime while that socket is up. It also pulls about every 30 seconds, which is what covers a dropped socket. Offline edits stay on the phone and merge when the network returns. Each task keeps the copy with the later `updatedAt`.
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. Open the SQL editor. Run [`supabase/schema.sql`](supabase/schema.sql), then [`supabase/migrations/0001_owner_sync.sql`](supabase/migrations/0001_owner_sync.sql). If this project already had the sharing functions, run `schema.sql` again so the caps below match.
+3. Project Settings → API: copy the **Project URL** and the **anon public** key. Do not copy the service_role key.
+4. Make a space id, a long random string used only for this phone:
+
+   ```bash
+   openssl rand -hex 32
+   ```
+
+5. On GitHub: this repo → Settings → Secrets and variables → Actions → New repository secret. Add these three. The Android workflow bakes them into the APK. Empty secrets leave that build local-only. Do not commit the values.
+
+   | Secret                   | Value                      |
+   | ------------------------ | -------------------------- |
+   | `VITE_SUPABASE_URL`      | Project URL                |
+   | `VITE_SUPABASE_ANON_KEY` | anon public key            |
+   | `VITE_SYNC_SPACE_ID`     | The hex string from step 4 |
+
+6. Rebuild the APK (push to `main`, or run the Android APK workflow). Install that build. The same three variables can be set in the shell before `npm run dev` on a computer. Restart the dev server after changing them.
+
+The anon key and the space id both end up inside the APK, because the phone has to send them. Anyone who unpacks the app can read and change this space. Row level security only returns rows whose `space_id` matches the `x-sync-space` header, so a request without that id sees nothing, and one space cannot read another. It does not protect this space from someone who has the app. Do not put another person’s private notes in this project. The service_role key bypasses that lock; keep it out of the app, the GitHub secrets, and the script. To rotate the space id, generate a new one, update the secret, rebuild, and leave the old rows where they are.
+
+### Edit a task from a computer
+
+With the same three variables exported:
+
+```bash
+node scripts/remote-edit.mjs notes --list "Fire department" --task "Check hydrant map" --notes "Called the station"
+node scripts/remote-edit.mjs add --list "Personal" --task "Buy milk"
+node scripts/remote-edit.mjs remove --list "Personal" --task "Buy milk"
+```
+
+`SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SYNC_SPACE_ID` are accepted as aliases. The list match is the full name or slug. The task match is the full title. Comparison ignores case.
+
+### Invite sharing
+
 Sharing is an invite link for **one list**. Barbershop can be shared while Fire department and Personal stay on the phone. A collaborator who opens the link only receives that list, and live updates stay on that list. Each list has its own token. The status line says On this phone, Syncing, Live, Offline, or Reconnecting. A failed Daily calendar read shows on that same line.
 
 Free tier, enforced in the app and in SQL:
 
-- 2 shared lists (`FREE_SHARED_LIST_CAP`)
-- 3 members per list (`FREE_MEMBER_CAP`)
+- 25 shared lists (`FREE_SHARED_LIST_CAP`)
+- 10 members per list (`FREE_MEMBER_CAP`)
 
 Local-only lists are not capped.
 
-1. Create a free project at [supabase.com](https://supabase.com).
-2. Open the SQL editor and run [`supabase/schema.sql`](supabase/schema.sql).
-3. Project Settings → API: copy the project URL and the `anon` public key.
-4. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. Restart.
-5. Tap **Share this list** and send the link. The other person opens it in a browser. No accounts. They see that list only.
+1. The project and SQL from the owner-sync steps above are the same ones sharing uses. `schema.sql` is the sharing functions.
+2. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (the space id is not required for an invite).
+3. Tap **Share this list** and send the link. The other person opens it in a browser. No accounts. They see that list only.
 
-The anon key is public. The tables are locked. Only the SQL functions can read or write, and only if the request has the invite token. Do not switch those functions to “allow all” to make debugging easier.
+The anon key is public. The sharing tables are locked to the SQL functions, and those functions require the invite token. Do not switch them to “allow all” to make debugging easier. Owner-sync tables are locked to the space id header, as described above.
 
-Search `UPGRADE PATH` in `src/lib/checklist/limits.ts` and `src/lib/checklist/sharing.ts`. Raising the caps is a one-line change in both `limits.ts` and `schema.sql` (re-run the functions). `upgradeLimits()` is the stub a paid plan would replace. Polling can be swapped for Supabase Realtime without touching the screen.
+Search `UPGRADE PATH` in `src/lib/checklist/limits.ts` and `src/lib/checklist/sharing.ts`. Raising the caps is a one-line change in both `limits.ts` and `schema.sql` (re-run the functions). `upgradeLimits()` is the stub a paid plan would replace. Nothing in the app charges the user.
 
 ## Offline
 
-Every checkbox, title, note draft, and due date writes to `localStorage` first. Supabase is a second copy for lists you have shared. If the network drops, the status dot switches to Offline and flips to Reconnecting when it returns. Notes you have not tapped **save** on stay on this phone and are not sent.
+Every checkbox, title, note draft, and due date writes to `localStorage` first. With the space id set, Supabase is a second copy of every list. Without it, Supabase is a second copy only for lists you have shared. If the network drops, the status dot switches to Offline and flips to Reconnecting when it returns. Notes you have not tapped **save** on stay on this phone and are not sent.
 
 ## Publish to the App Store or Google Play
 

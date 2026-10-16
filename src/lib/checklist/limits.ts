@@ -3,11 +3,11 @@
  * Keep the numbers in supabase/schema.sql (v_list_cap, v_member_cap) in sync.
  */
 
-/** A handful of shared lists on the free tier. Local-only lists are unlimited. */
-export const FREE_SHARED_LIST_CAP = 2;
+/** Shared lists on the free tier. Local-only lists are unlimited. */
+export const FREE_SHARED_LIST_CAP = 25;
 
-/** A few members per shared list on the free tier. */
-export const FREE_MEMBER_CAP = 3;
+/** Members per shared list on the free tier. */
+export const FREE_MEMBER_CAP = 10;
 
 /**
  * UPGRADE PATH — shared-list limits.

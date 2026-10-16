@@ -84,7 +84,15 @@ function asTasks(value: unknown): RemoteTask[] | null {
 
 function asRemote(result: RpcResult): RemoteList | null {
   const tasks = asTasks(result.tasks);
-  if (!result.id || !result.slug || !result.name || !result.inviteToken || !result.updatedAt || !tasks) return null;
+  if (
+    !result.id ||
+    !result.slug ||
+    !result.name ||
+    !result.inviteToken ||
+    !result.updatedAt ||
+    !tasks
+  )
+    return null;
   return {
     id: result.id,
     slug: result.slug,
@@ -130,6 +138,12 @@ function reasonMessage(reason: string | undefined, detail?: string): string {
 let timer: number | null = null;
 let poll = 0;
 let running = false;
+let yieldIdleStatus = false;
+
+/** Space sync sets this so an idle share poll does not cover a live owner sync. */
+export function holdIdleSyncStatus(hold: boolean): void {
+  yieldIdleStatus = hold;
+}
 
 async function reconcile(quiet: boolean): Promise<void> {
   if (!supabaseConfigured() || running) return;
@@ -139,14 +153,22 @@ async function reconcile(quiet: boolean): Promise<void> {
   }
   const shared = getSnapshot().lists.filter((list) => list.shared);
   if (!shared.length) {
-    stampSync(typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "local", "");
+    if (!yieldIdleStatus) {
+      stampSync(
+        typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "local",
+        "",
+      );
+    }
     return;
   }
   running = true;
   if (!quiet) stampSync("syncing", "");
   try {
     for (const list of shared) {
-      const pulled = await rpc("checklist_pull", { p_token: list.inviteToken, p_device: deviceId() });
+      const pulled = await rpc("checklist_pull", {
+        p_token: list.inviteToken,
+        p_device: deviceId(),
+      });
       if (pulled.ok === false && pulled.reason && pulled.reason !== "not-found") {
         stampSync("reconnecting", reasonMessage(pulled.reason, pulled.detail));
         return;
@@ -204,7 +226,10 @@ function schedule(): void {
 
 export function startSharing(): () => void {
   if (!supabaseConfigured()) {
-    stampSync(typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "local", "");
+    stampSync(
+      typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "local",
+      "",
+    );
   } else {
     void reconcile(false);
   }
@@ -226,7 +251,8 @@ export function startSharing(): () => void {
     stampSync("reconnecting", "");
     void reconcile(false);
   };
-  const onOffline = () => stampSync("offline", "Changes stay on this phone until you’re back online.");
+  const onOffline = () =>
+    stampSync("offline", "Changes stay on this phone until you’re back online.");
   const onVisible = () => {
     if (document.visibilityState === "visible") void reconcile(true);
   };
@@ -247,13 +273,16 @@ export function startSharing(): () => void {
   };
 }
 
-export async function pullInvite(token: string): Promise<{ ok: boolean; message: string; list?: RemoteList }> {
+export async function pullInvite(
+  token: string,
+): Promise<{ ok: boolean; message: string; list?: RemoteList }> {
   if (!supabaseConfigured()) {
     return { ok: false, message: "That invite needs Supabase, and it isn’t connected." };
   }
   try {
     const result = await rpc("checklist_join", { p_token: token, p_device: deviceId() });
-    if (result.ok === false) return { ok: false, message: reasonMessage(result.reason, result.detail) };
+    if (result.ok === false)
+      return { ok: false, message: reasonMessage(result.reason, result.detail) };
     const remote = asRemote(result);
     if (!remote) return { ok: false, message: "The shared list came back empty." };
     return { ok: true, message: `Joined ${remote.name}.`, list: remote };

@@ -40,6 +40,10 @@ jobs:
           # Empty secrets leave the Command box with a clear "not set up" message.
           VITE_CALENDAR_HOOK_URL: ${{ secrets.VITE_CALENDAR_HOOK_URL }}
           VITE_CALENDAR_HOOK_TOKEN: ${{ secrets.VITE_CALENDAR_HOOK_TOKEN }}
+          # Owner sync. Empty secrets leave the phone on local storage only.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_SYNC_SPACE_ID: ${{ secrets.VITE_SYNC_SPACE_ID }}
         run: npm run build:spa
 
       - name: Confirm Google client ID is in the SPA bundle

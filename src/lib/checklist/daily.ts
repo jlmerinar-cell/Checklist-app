@@ -33,6 +33,7 @@ function taskFromEvent(id: string, title: string): Task {
     calendarPending: false,
     notesOpen: false,
     editing: false,
+    updatedAt: new Date().toISOString(),
   };
 }
 
