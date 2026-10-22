@@ -19,18 +19,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # App unit tests. The scripts/*.test.mjs suite reads gitignored .grok
-      # template files that are not in this repository snapshot.
+      # App unit tests (the 105 v1.4.1 tests). The scripts/*.test.mjs suite
+      # reads gitignored .grok template files that are not in this snapshot.
       - name: Test
-        run: |
-          node --experimental-strip-types --test \
-            src/lib/app-data/app-data.test.ts \
-            src/lib/app-data/readiness-schedule.test.ts \
-            src/lib/auth/gate-identity.test.ts \
-            src/lib/auth/sign-in-gate.test.ts \
-            src/lib/preview-path-prefix.test.ts
-          node --experimental-strip-types --import ./scripts/register-ts-ext.mjs --test \
-            src/lib/checklist/calendar-phrase.test.ts
+        run: node --experimental-strip-types --test 'src/lib/**/*.test.ts'
 
       - name: Typecheck
         run: npm run typecheck
