@@ -1,103 +1,63 @@
-/**
- * Google Calendar. One-time browser login, token stored locally.
- *
- * CALENDAR OAUTH — FREE / UNVERIFIED CONSENT
- * The Google Cloud OAuth client stays in Testing until Google verifies the
- * app. calendar.events is a sensitive scope. While Testing, only Google
- * accounts added as Test users on the consent screen can connect.
- *
- * VERIFIED_CONSENT — upgrade path for a public App Store / Play build:
- * 1. Move the consent screen from Testing to In production.
- * 2. Submit verification for https://www.googleapis.com/auth/calendar.events
- *    (privacy policy, homepage, scope justification, demo video).
- * 3. After approval, any Google account can connect. Remove the testing-mode
- *    copy in StatusBar (search: testing mode).
- * 4. Optional: exchange the auth code on a server you control for a refresh
- *    token. This file uses the browser token client on purpose — no client
- *    secret ships in the app. A refresh token needs that server.
- *
- * The same calendar.events token reads today's events for the Daily tab
- * (events.list) and writes due-date events. Testing mode still limits both
- * to the Google accounts you added as test users.
- */
+import type { CmdResult } from "./commands.ts";
+import { getState, setCalendarLink, setCalendarStatus, snapshot } from "./store.ts";
+import { dueAtFromParts, isDateOnly } from "./time.ts";
+import { KEY_TOKEN } from "./types.ts";
 
-import { getSnapshot, setCalendarResult, stampCalendar } from "./storage";
+export const DEFAULT_GOOGLE_CLIENT_ID =
+  "84319457158-nr9sm2i9v3l9plrbabbe2okod8c771be.apps.googleusercontent.com";
 
-const TOKEN_KEY = "checklist.google.token";
-const SCOPE = "https://www.googleapis.com/auth/calendar.events";
+const SCOPE = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly";
 const SCRIPT = "https://accounts.google.com/gsi/client";
 
-type StoredToken = { accessToken: string; expiresAt: number };
+export type GoogleToken = { accessToken: string; expiresAt: number };
 
-type TokenResponse = {
-  access_token?: string;
-  expires_in?: number;
-  error?: string;
-};
-
-type TokenClient = {
-  requestAccessToken: (override?: { prompt?: string }) => void;
-};
-
-declare global {
-  interface Window {
-    google?: {
-      accounts: {
-        oauth2: {
-          initTokenClient: (config: {
-            client_id: string;
-            scope: string;
-            callback: (response: TokenResponse) => void;
-          }) => TokenClient;
-        };
-      };
-    };
-  }
+export function googleClientId(): string {
+  const fromEnv = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
+  return fromEnv || DEFAULT_GOOGLE_CLIENT_ID;
 }
 
-export function clientId(): string {
-  return import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
+export function isNativeShell(): boolean {
+  if (typeof window === "undefined") return false;
+  if (window.Capacitor?.isNativePlatform?.()) return true;
+  if (window.Capacitor) return true;
+  return /capacitor/i.test(navigator.userAgent);
 }
 
-export function calendarConfigured(): boolean {
-  return clientId().length > 0;
-}
-
-function readToken(): StoredToken | null {
+function readToken(): GoogleToken | null {
   if (typeof localStorage === "undefined") return null;
   try {
-    const raw = localStorage.getItem(TOKEN_KEY);
+    const raw = localStorage.getItem(KEY_TOKEN);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as StoredToken;
+    const parsed = JSON.parse(raw) as Partial<GoogleToken>;
     if (!parsed.accessToken || typeof parsed.expiresAt !== "number") return null;
-    return parsed;
+    return { accessToken: parsed.accessToken, expiresAt: parsed.expiresAt };
   } catch {
     return null;
   }
 }
 
-function writeToken(token: StoredToken | null): void {
+function writeToken(token: GoogleToken | null): void {
   if (typeof localStorage === "undefined") return;
-  if (!token) localStorage.removeItem(TOKEN_KEY);
-  else localStorage.setItem(TOKEN_KEY, JSON.stringify(token));
+  if (token) localStorage.setItem(KEY_TOKEN, JSON.stringify(token));
+  else localStorage.removeItem(KEY_TOKEN);
 }
 
-export function initCalendar(): void {
-  if (!calendarConfigured()) {
-    stampCalendar("off");
+export function currentToken(): GoogleToken | null {
+  const token = readToken();
+  if (!token) return null;
+  if (token.expiresAt <= Date.now()) return null;
+  return token;
+}
+
+export function refreshCalendarStatus(): void {
+  if (isNativeShell()) {
+    setCalendarStatus("native", "Calendar sign-in works in the browser version");
     return;
   }
   const token = readToken();
-  if (!token) {
-    stampCalendar("ready");
-    return;
-  }
-  if (token.expiresAt <= Date.now()) {
-    stampCalendar("expired");
-    return;
-  }
-  stampCalendar("connected");
-  flushCalendarNow();
+  if (!token) setCalendarStatus("ready", "");
+  else if (token.expiresAt <= Date.now()) setCalendarStatus("expired", "");
+  else setCalendarStatus("connected", "");
 }
 
 function loadScript(): Promise<void> {
@@ -107,9 +67,7 @@ function loadScript(): Promise<void> {
     const existing = document.querySelector<HTMLScriptElement>(`script[src="${SCRIPT}"]`);
     if (existing) {
       existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Google sign-in failed to load")), {
-        once: true,
-      });
+      existing.addEventListener("error", () => reject(new Error("Google sign-in failed to load")), { once: true });
       return;
     }
     const script = document.createElement("script");
@@ -121,55 +79,45 @@ function loadScript(): Promise<void> {
   });
 }
 
-export function connectCalendar(): Promise<{ ok: boolean; message: string }> {
-  if (!calendarConfigured()) {
-    stampCalendar("off");
-    return Promise.resolve({
-      ok: false,
-      message: "Calendar isn’t set up yet. Add a Google OAuth client to connect due dates.",
-    });
+export async function connectCalendar(): Promise<CmdResult> {
+  if (isNativeShell()) {
+    const message = "Calendar sign-in works in the browser version";
+    setCalendarStatus("native", message);
+    return { ok: false, message };
   }
-  return loadScript().then(
-    () =>
-      new Promise((resolve) => {
-        const google = window.google;
-        if (!google?.accounts?.oauth2) {
-          resolve({ ok: false, message: "Google sign-in didn’t load." });
-          return;
-        }
-        const client = google.accounts.oauth2.initTokenClient({
-          client_id: clientId(),
-          scope: SCOPE,
-          callback: (response) => {
-            if (!response.access_token) {
-              const refused = response.error === "access_denied" || response.error === "interaction_required";
-              resolve({
-                ok: false,
-                message: refused
-                  ? "Google refused the connection. In testing mode only test users you added can connect."
-                  : "Calendar connection was cancelled.",
-              });
-              return;
-            }
+  try {
+    await loadScript();
+  } catch {
+    return { ok: false, message: "Google sign-in failed to load." };
+  }
+  const oauth = window.google?.accounts?.oauth2;
+  if (!oauth) return { ok: false, message: "Google sign-in didn’t load." };
+  return new Promise((resolve) => {
+    oauth
+      .initTokenClient({
+        client_id: googleClientId(),
+        scope: SCOPE,
+        callback: (response) => {
+          if (response.access_token) {
             writeToken({
               accessToken: response.access_token,
               expiresAt: Date.now() + (response.expires_in ?? 3600) * 1000,
             });
-            stampCalendar("connected");
-            flushCalendarNow();
+            setCalendarStatus("connected", "");
+            void flushCalendar();
             resolve({ ok: true, message: "Calendar connected on this phone." });
-          },
-        });
-        client.requestAccessToken({ prompt: "consent" });
-      }),
-    () => ({ ok: false, message: "Google sign-in failed to load." }),
-  );
-}
-
-function nextDate(iso: string): string {
-  const [year, month, day] = iso.split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day + 1));
-  return date.toISOString().slice(0, 10);
+            return;
+          }
+          const message =
+            response.error === "access_denied"
+              ? "Only approved test accounts can connect right now."
+              : "Calendar connection was cancelled.";
+          setCalendarStatus(readToken() ? "expired" : "ready", message);
+          resolve({ ok: false, message });
+        },
+      })
+      .requestAccessToken({ prompt: "consent" });
+  });
 }
 
 async function googleFetch(url: string, token: string, init?: RequestInit): Promise<Response> {
@@ -184,7 +132,7 @@ async function googleFetch(url: string, token: string, init?: RequestInit): Prom
   });
   if (response.status === 401) {
     writeToken(null);
-    stampCalendar("expired");
+    setCalendarStatus("expired", "");
   }
   return response;
 }
@@ -192,126 +140,155 @@ async function googleFetch(url: string, token: string, init?: RequestInit): Prom
 let flushing = false;
 let flushTimer: number | null = null;
 
-async function runFlush(): Promise<void> {
-  if (flushing) return;
-  const token = readToken();
-  if (!calendarConfigured() || !token || token.expiresAt <= Date.now()) return;
-  flushing = true;
-  try {
-    const lists = getSnapshot().lists;
-    for (const list of lists) {
-      for (const task of list.tasks) {
-        if (!task.calendarPending) continue;
-        if (!task.due && task.calendarEventId) {
-          const deleted = await googleFetch(
-            `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(task.calendarEventId)}`,
-            token.accessToken,
-            { method: "DELETE" },
-          );
-          if (deleted.status === 401) return;
-          if (deleted.ok || deleted.status === 404 || deleted.status === 410) {
-            setCalendarResult(list.id, task.id, null, false);
-          }
-          continue;
-        }
-        if (!task.due) {
-          setCalendarResult(list.id, task.id, null, false);
-          continue;
-        }
-        const body = {
-          summary: task.title || "Checklist",
-          description: [`Checklist: ${list.name}`, task.notes].filter(Boolean).join("\n\n"),
-          start: { date: task.due },
-          end: { date: nextDate(task.due) },
-        };
-        const endpoint = task.calendarEventId
-          ? `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(task.calendarEventId)}`
-          : "https://www.googleapis.com/calendar/v3/calendars/primary/events";
-        const saved = await googleFetch(endpoint, token.accessToken, {
-          method: task.calendarEventId ? "PATCH" : "POST",
-          body: JSON.stringify(body),
-        });
-        if (saved.status === 401) return;
-        if (!saved.ok) continue;
-        const payload = (await saved.json()) as { id?: string };
-        if (payload.id) setCalendarResult(list.id, task.id, payload.id, false);
-      }
-    }
-  } catch {
-    /* due date stays on the phone; the next flush retries */
-  } finally {
-    flushing = false;
-  }
-}
-
-export function flushCalendar(): void {
+export function scheduleCalendarFlush(): void {
   if (typeof window === "undefined") {
-    void runFlush();
+    void flushCalendar();
     return;
   }
   if (flushTimer) window.clearTimeout(flushTimer);
   flushTimer = window.setTimeout(() => {
     flushTimer = null;
-    void runFlush();
+    void flushCalendar();
   }, 500);
 }
 
-export function flushCalendarNow(): void {
-  if (typeof window === "undefined") {
-    void runFlush();
+export async function flushCalendar(): Promise<void> {
+  if (flushing) return;
+  const token = currentToken();
+  if (!token) {
+    refreshCalendarStatus();
     return;
   }
-  if (flushTimer) window.clearTimeout(flushTimer);
-  flushTimer = null;
-  void runFlush();
-}
-
-export type TodayEvent = { id: string; title: string };
-
-function localDayBounds(now = new Date()): { day: string; timeMin: string; timeMax: string } {
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  const month = String(start.getMonth() + 1).padStart(2, "0");
-  const date = String(start.getDate()).padStart(2, "0");
-  return { day: `${start.getFullYear()}-${month}-${date}`, timeMin: start.toISOString(), timeMax: end.toISOString() };
-}
-
-/** Today's primary-calendar events. Failures return a message; they do not throw. */
-export async function listTodayEvents(): Promise<
-  { ok: true; day: string; events: TodayEvent[] } | { ok: false; day: string; message: string }
-> {
-  const bounds = localDayBounds();
-  if (!calendarConfigured()) {
-    return { ok: false, day: bounds.day, message: "Daily needs a Google calendar connection." };
-  }
-  const token = readToken();
-  if (!token || token.expiresAt <= Date.now()) {
-    if (token) stampCalendar("expired");
-    return { ok: false, day: bounds.day, message: "Reconnect the calendar so Daily can read today." };
-  }
-  if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    return { ok: false, day: bounds.day, message: "Offline. Daily will try again when you're back." };
-  }
+  flushing = true;
   try {
-    const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
-    url.searchParams.set("timeMin", bounds.timeMin);
-    url.searchParams.set("timeMax", bounds.timeMax);
+    const calendarId = encodeURIComponent(getState().settings.calendarId || "primary");
+    for (const list of snapshot().lists) {
+      for (const task of list.tasks) {
+        if (!task.calendarPending || task.deletedAt) continue;
+        if (!task.dueAt && task.calendarEventId) {
+          const response = await googleFetch(
+            `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${encodeURIComponent(task.calendarEventId)}`,
+            token.accessToken,
+            { method: "DELETE" },
+          );
+          if (response.status === 401) return;
+          if (response.ok || response.status === 404 || response.status === 410) {
+            setCalendarLink(list.id, task.id, null, false);
+          }
+          continue;
+        }
+        if (!task.dueAt) {
+          setCalendarLink(list.id, task.id, null, false);
+          continue;
+        }
+        const body = {
+          summary: task.title || "Checklist",
+          description: [`Checklist: ${list.name}`, task.notes].filter(Boolean).join("\n\n"),
+          start: { dateTime: task.dueAt },
+          end: { dateTime: new Date(Date.parse(task.dueAt) + 30 * 60 * 1000).toISOString() },
+        };
+        const response = await googleFetch(
+          task.calendarEventId
+            ? `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${encodeURIComponent(task.calendarEventId)}`
+            : `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`,
+          token.accessToken,
+          { method: task.calendarEventId ? "PATCH" : "POST", body: JSON.stringify(body) },
+        );
+        if (response.status === 401) return;
+        if (!response.ok) continue;
+        const created = (await response.json()) as { id?: string };
+        if (created.id) setCalendarLink(list.id, task.id, created.id, false);
+      }
+    }
+  } catch {
+    /* stay quiet; the due date is still saved on the phone */
+  } finally {
+    flushing = false;
+  }
+}
+
+export async function listCalendars(): Promise<{ id: string; summary: string }[]> {
+  const token = currentToken();
+  if (!token) return [];
+  const response = await googleFetch(
+    "https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=50",
+    token.accessToken,
+  );
+  if (!response.ok) return [];
+  const body = (await response.json()) as { items?: { id?: string; summary?: string }[] };
+  return (body.items ?? [])
+    .filter((item) => item.id)
+    .map((item) => ({ id: item.id as string, summary: item.summary || item.id || "Calendar" }));
+}
+
+function nextCalendarDay(day: string): string | null {
+  if (!isDateOnly(day)) return null;
+  const [year, month, date] = day.split("-").map(Number);
+  if (!year || !month || !date) return null;
+  return new Date(Date.UTC(year, month - 1, date + 1)).toISOString().slice(0, 10);
+}
+
+async function readEvents(
+  calendarId: string,
+  timeMin: string,
+  timeMax: string,
+  copy: { reconnect: string; offline: string; expired: string; failed: string },
+): Promise<{ ok: true; events: { id: string; title: string }[] } | { ok: false; message: string }> {
+  const token = currentToken();
+  if (!token) return { ok: false, message: copy.reconnect };
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return { ok: false, message: copy.offline };
+  try {
+    const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);
+    url.searchParams.set("timeMin", timeMin);
+    url.searchParams.set("timeMax", timeMax);
     url.searchParams.set("singleEvents", "true");
     url.searchParams.set("orderBy", "startTime");
     url.searchParams.set("maxResults", "40");
     const response = await googleFetch(url.toString(), token.accessToken);
-    if (response.status === 401) {
-      return { ok: false, day: bounds.day, message: "Calendar session expired. Reconnect, then Daily can read today." };
-    }
-    if (!response.ok) {
-      return { ok: false, day: bounds.day, message: "Couldn't read today's calendar." };
-    }
-    const payload = (await response.json()) as { items?: Array<{ id?: string; summary?: string; status?: string }> };
-    const events = (payload.items ?? [])
+    if (response.status === 401) return { ok: false, message: copy.expired };
+    if (!response.ok) return { ok: false, message: copy.failed };
+    const body = (await response.json()) as { items?: { id?: string; summary?: string; status?: string }[] };
+    const events = (body.items ?? [])
       .filter((item) => item.status !== "cancelled" && typeof item.id === "string")
       .map((item) => ({ id: item.id as string, title: (item.summary || "Busy").slice(0, 200) }));
-    return { ok: true, day: bounds.day, events };
+    return { ok: true, events };
   } catch {
-    return { ok: false, day: bounds.day, message: "Couldn't read today's calendar." };
+    return { ok: false, message: copy.failed };
   }
+}
+
+const DAILY_COPY = {
+  reconnect: "Reconnect the calendar so Daily can read today.",
+  offline: "Offline. Daily will try again when you're back.",
+  expired: "Calendar session expired. Reconnect, then Daily can read today.",
+  failed: "Couldn't read today's calendar.",
+};
+
+const SHIFT_COPY = {
+  reconnect: "Reconnect the calendar so shift days can be read.",
+  offline: "Offline. Shift reset will try again when you're back.",
+  expired: "Calendar session expired. Reconnect, then the shift list can start.",
+  failed: "Couldn't read the shift calendar.",
+};
+
+/** Events on one America/New_York calendar day, including all-day shift events from Goldie. */
+export async function eventsForEasternDay(
+  calendarId: string,
+  day: string,
+): Promise<{ ok: true; events: { id: string; title: string }[] } | { ok: false; message: string }> {
+  const start = dueAtFromParts(day, "00:00");
+  const endDay = nextCalendarDay(day);
+  const end = endDay ? dueAtFromParts(endDay, "00:00") : null;
+  if (!start || !end) return { ok: false, message: SHIFT_COPY.failed };
+  return readEvents(calendarId, start, end, SHIFT_COPY);
+}
+
+export async function eventsToday(
+  calendarId: string,
+): Promise<{ ok: true; events: { id: string; title: string }[] } | { ok: false; message: string }> {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return readEvents(calendarId, start.toISOString(), end.toISOString(), DAILY_COPY);
 }
