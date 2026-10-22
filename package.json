@@ -16,7 +16,7 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs'; script_status=$?; node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/preview-path-prefix.test.ts src/lib/checklist/migrate.test.ts src/lib/checklist/shift.test.ts src/lib/checklist/countdown.test.ts src/lib/checklist/theme.test.ts src/lib/checklist/theme-edit.test.ts src/lib/checklist/voice.test.ts src/lib/checklist/speech.test.ts src/lib/checklist/notify.test.ts; app_status=$?; exit $((script_status || app_status))",
+    "test": "node --test 'scripts/**/*.test.mjs'; script_status=$?; node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/preview-path-prefix.test.ts src/lib/checklist/migrate.test.ts src/lib/checklist/shift.test.ts src/lib/checklist/countdown.test.ts src/lib/checklist/theme.test.ts src/lib/checklist/theme-edit.test.ts src/lib/checklist/voice.test.ts src/lib/checklist/speech.test.ts src/lib/checklist/notify.test.ts src/lib/checklist/lists.test.ts; app_status=$?; exit $((script_status || app_status))",
     "lint": "eslint .",
     "format": "prettier --write .",
     "build:spa": "vite build -c vite.spa.config.ts",
@@ -105,6 +105,6 @@
     "prettier": "^3.4.0",
     "typescript-eslint": "^8.56.1"
   },
-  "version": "1.4.5",
+  "version": "1.4.6",
   "androidVersionCode": 9
 }

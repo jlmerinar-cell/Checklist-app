@@ -1,3 +1,4 @@
+import { listsForSwitcher } from "./chrome.ts";
 import { defaultColumns, migrateV1toV2, normalizeList, themeIdOf } from "./migrate.ts";
 import {
   appearanceFor,
@@ -645,10 +646,17 @@ export function deleteList(id: string): string | null {
   if (list.system) return "Daily can't be deleted.";
   const stamp = nowIso();
   const lists = state.lists.map((item) =>
-    item.id === id ? { ...item, deletedAt: stamp, updatedAt: stamp } : item,
+    item.id === id
+      ? {
+          ...item,
+          deletedAt: stamp,
+          updatedAt: stamp,
+          tasks: item.tasks.map((task) => (task.deletedAt ? task : { ...task, deletedAt: stamp, updatedAt: stamp })),
+        }
+      : item,
   );
-  const nextActive =
-    state.activeId === id ? (visibleLists(lists)[0]?.id ?? null) : state.activeId;
+  const shown = listsForSwitcher(visibleLists(lists), state.settings.dailyEnabled);
+  const nextActive = state.activeId === id ? (shown[0]?.id ?? null) : state.activeId;
   commit({ ...state, lists, activeId: nextActive }, { sync: true });
   return null;
 }

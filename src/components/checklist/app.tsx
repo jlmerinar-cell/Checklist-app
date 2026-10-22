@@ -16,7 +16,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Check, ChevronDown, GripVertical, Mic, Settings } from "lucide-react";
+import { Check, ChevronDown, GripVertical, Mic, Pencil, Settings } from "lucide-react";
 import {
   createContext,
   useContext,
@@ -26,6 +26,7 @@ import {
   useSyncExternalStore,
   type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { GearPanel } from "@/components/checklist/gear-panel";
@@ -34,6 +35,7 @@ import { useChecklistRuntime } from "@/components/checklist/runtime";
 import { isNativeShell } from "@/lib/checklist/calendar";
 import { emptyListCopy, listsForSwitcher, showListSwitcher } from "@/lib/checklist/chrome";
 import { switchCommand } from "@/lib/checklist/commands";
+import { editTargets, followInApp } from "@/lib/checklist/list-edit";
 import { dueTone, formatCountdown, tasksCrossingDue } from "@/lib/checklist/countdown";
 import { signalDue } from "@/lib/checklist/notify";
 import { completion } from "@/lib/checklist/score";
@@ -42,6 +44,7 @@ import {
   activeList,
   addTask,
   columnsOf,
+  createList,
   currentAppearance,
   deleteTask,
   getSeed,
@@ -469,8 +472,9 @@ function ColumnBlock({
   );
 }
 
-function ListPanel({ list, initialExpanded = [] }: { list: List; initialExpanded?: string[] }) {
-  const calendarOnThisPhone = !(isNativeShell() || useChecklist().calendar === "native");
+export function ListPanel({ list, initialExpanded = [] }: { list: List; initialExpanded?: string[] }) {
+  const checklist = useChecklist();
+  const calendarOnThisPhone = !(isNativeShell() || checklist.calendar === "native");
   const columns = columnsOf(list);
   const sensors = useHoldSensors();
   const [openIds, setOpenIds] = useState(() => new Set(initialExpanded));
@@ -547,7 +551,7 @@ function OverdueBanner({ list, now }: { list: List; now: Date }) {
   );
 }
 
-function ListAddTask({ list }: { list: List }) {
+export function ListAddTask({ list }: { list: List }) {
   const [draft, setDraft] = useState("");
   return (
     <form
@@ -574,6 +578,44 @@ function ListAddTask({ list }: { list: List }) {
       </label>
       <button type="submit" className="min-h-14 rounded-card bg-accent px-3 text-on-accent">
         Add
+      </button>
+    </form>
+  );
+}
+
+function openHref(event: ReactMouseEvent<HTMLAnchorElement>, href: string) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  followInApp(href);
+}
+
+function AddListForm() {
+  const [name, setName] = useState("");
+  return (
+    <form
+      className="add-list-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const list = createList(name);
+        setName("");
+        setMessage(`Added ${list.name}.`);
+      }}
+    >
+      <label className="flex min-w-0 flex-1 flex-col gap-1" htmlFor="add-list-name">
+        <span className="fine text-muted">New list</span>
+        <input
+          id="add-list-name"
+          className="field"
+          aria-label="New list name"
+          placeholder="List name"
+          value={name}
+          maxLength={200}
+          enterKeyHint="done"
+          onChange={(event) => setName(event.target.value)}
+        />
+      </label>
+      <button type="submit" className="min-h-14 shrink-0 rounded-card bg-accent px-3 text-on-accent">
+        Add list
       </button>
     </form>
   );
@@ -755,6 +797,22 @@ export function ChecklistApp({
             </button>
           </div>
         </div>
+        <nav className="list-edit-row" aria-label="Edit lists">
+          {editTargets(shown).map((item) => (
+            <a
+              key={item.id}
+              href={item.href}
+              className="list-edit-chip"
+              aria-label={`Edit list ${item.name}`}
+              data-edit-list={item.id}
+              onClick={(event) => openHref(event, item.href)}
+            >
+              <Pencil aria-hidden="true" className="size-4" />
+              <span>{item.name}</span>
+            </a>
+          ))}
+        </nav>
+        <AddListForm />
         {list ? <ListProgress list={list} /> : null}
         {list ? <OverdueBanner list={list} now={now} /> : null}
         {list ? <ListAddTask list={list} /> : null}
