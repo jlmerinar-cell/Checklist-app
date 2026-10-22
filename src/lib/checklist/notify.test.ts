@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { applyReminders, EXACT_ALARM_HINT, planReminders, type ReminderPlugin, type ReminderTask } from "./notify.ts";
+import { applyReminders, EXACT_ALARM_HINT, planReminders, requestNotificationAccess, type ReminderPlugin, type ReminderTask } from "./notify.ts";
 
 const now = new Date(2026, 9, 20, 12, 0, 0);
 const due = new Date(2026, 9, 20, 18, 0, 0);
@@ -39,6 +39,15 @@ function mockPlugin(exact: string | null = "granted"): ReminderPlugin & {
       : undefined,
   };
 }
+
+describe("requestNotificationAccess", () => {
+  it("asks the Android plugin for permission when the app is on the phone", () => {
+    const source = requestNotificationAccess.toString();
+    assert.match(source, /onDevice\(\)/);
+    assert.match(source, /checkPermissions/);
+    assert.match(source, /requestPermissions/);
+  });
+});
 
 describe("planReminders", () => {
   it("plans a lead and the due alert, and skips done or past tasks", () => {

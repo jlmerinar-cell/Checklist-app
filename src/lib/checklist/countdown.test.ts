@@ -49,7 +49,25 @@ describe("dueTone", () => {
   it("sets a local time today and formats it as by 6:00 PM", () => {
     const due = dueAtFromLocalClock(18, 0, clock);
     assert.equal(new Date(due).getHours(), 18);
+    assert.equal(new Date(due).getDate(), clock.getDate());
     assert.match(formatByTime(due), /^by 6:00\sPM$/);
+  });
+
+  it("rolls a bare clock that has already passed to the next time it comes up", () => {
+    const later = new Date(2026, 9, 20, 18, 30, 0);
+    const due = dueAtFromLocalClock(18, 0, later);
+    const when = new Date(due);
+    assert.equal(when.getHours(), 18);
+    assert.equal(when.getMinutes(), 0);
+    assert.equal(when.getDate(), 21);
+  });
+
+  it("keeps a bare clock that is still ahead on the same day", () => {
+    const earlier = new Date(2026, 9, 20, 17, 0, 0);
+    const due = dueAtFromLocalClock(18, 0, earlier);
+    const when = new Date(due);
+    assert.equal(when.getDate(), 20);
+    assert.equal(when.getHours(), 18);
   });
 });
 

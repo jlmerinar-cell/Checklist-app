@@ -770,6 +770,7 @@ export function setNotificationIds(listId: string, taskId: string, notificationI
 }
 
 let lastFireStart = 0;
+let fireUndo: { lists: List[]; fdLastResetDay: string | null } | null = null;
 
 export function startFireList(when = new Date()): { ok: boolean; message: string } {
   const nowMs = Date.now();
@@ -784,6 +785,10 @@ export function startFireList(when = new Date()): { ok: boolean; message: string
     return { ok: false, message };
   }
   lastFireStart = nowMs;
+  fireUndo = {
+    lists: structuredClone(state.lists),
+    fdLastResetDay: state.settings.fdLastResetDay,
+  };
   const day = easternDay(when);
   const ids = new Set(targets.map((list) => list.id));
   const lists = state.lists.map((list) => (ids.has(list.id) ? resetShiftList(list, when) : list));
@@ -795,6 +800,28 @@ export function startFireList(when = new Date()): { ok: boolean; message: string
       ...state,
       lists,
       settings: touchSettings(state.settings, { fdLastResetDay: day }),
+      message,
+    },
+    { sync: true },
+  );
+  return { ok: true, message };
+}
+
+export function undoFireStart(): { ok: boolean; message: string } {
+  if (!fireUndo) {
+    const message = "Nothing to undo.";
+    setMessage(message);
+    return { ok: false, message };
+  }
+  const snapshot = fireUndo;
+  fireUndo = null;
+  lastFireStart = 0;
+  const message = "Undid the list start. Checks are back.";
+  commit(
+    {
+      ...state,
+      lists: snapshot.lists,
+      settings: touchSettings(state.settings, { fdLastResetDay: snapshot.fdLastResetDay }),
       message,
     },
     { sync: true },
@@ -959,14 +986,19 @@ export function addColumn(listId: string, name: string): string | null {
   return null;
 }
 
+/** Where a removed column's tasks go: the next column, or the previous one when this is last. */
+export function destinationColumn<T extends { id: string }>(columns: T[], columnId: string): T | null {
+  const index = columns.findIndex((column) => column.id === columnId);
+  if (index < 0 || columns.length < 2) return null;
+  return columns[index + 1] ?? columns[index - 1] ?? null;
+}
+
 export function removeColumn(listId: string, columnId: string): string | null {
   const list = state.lists.find((item) => item.id === listId);
   if (!list) return "List not found.";
   const columns = columnsOf(list);
   if (columns.length <= 1) return "A list keeps at least one column.";
-  const index = columns.findIndex((column) => column.id === columnId);
-  if (index < 0) return "Column not found.";
-  const nextColumn = columns[index + 1] ?? columns[index - 1];
+  const nextColumn = destinationColumn(columns, columnId);
   if (!nextColumn) return "A list keeps at least one column.";
   const remaining = columns.filter((column) => column.id !== columnId).map((column, order) => ({ ...column, order }));
   updateList(listId, (current) => ({
@@ -994,7 +1026,20 @@ export function moveColumn(listId: string, columnId: string, dir: -1 | 1): void 
 }
 
 export function setDailyEnabled(enabled: boolean): void {
-  commit({ ...state, settings: touchSettings(state.settings, { dailyEnabled: enabled }), dailyError: enabled ? state.dailyError : "" }, { sync: true });
+  const active = state.lists.find((list) => list.id === state.activeId);
+  const leaveDaily = !enabled && active?.kind === "daily";
+  const nextActive = leaveDaily
+    ? (visibleLists().find((list) => list.kind !== "daily")?.id ?? state.activeId)
+    : state.activeId;
+  commit(
+    {
+      ...state,
+      activeId: nextActive,
+      settings: touchSettings(state.settings, { dailyEnabled: enabled }),
+      dailyError: enabled ? state.dailyError : "",
+    },
+    { sync: true },
+  );
 }
 
 export function setDailyTasks(day: string, tasks: Task[], clearFirst: boolean): void {

@@ -1,7 +1,8 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { RenameControl } from "@/components/checklist/rename-control";
 import { SettingsScreen } from "@/components/checklist/settings-screen";
-import { shareCommand, switchCommand } from "@/lib/checklist/commands";
+import { isNativeShell } from "@/lib/checklist/calendar";
+import { shareBlurb, shareCommand, switchCommand } from "@/lib/checklist/commands";
 import { completion } from "@/lib/checklist/score";
 import {
   addColumn,
@@ -9,6 +10,7 @@ import {
   columnsOf,
   createList,
   deleteList,
+  destinationColumn,
   getSeed,
   getState,
   moveColumn,
@@ -16,14 +18,13 @@ import {
   removeColumn,
   renameColumn,
   renameList,
-  setListTheme,
-  setListThemeRecord,
   setMessage,
   startFireList,
   subscribe,
+  undoFireStart,
   visibleLists,
 } from "@/lib/checklist/store";
-import { listSelection, PRESET_LABELS, themeRecordFromCustom } from "@/lib/checklist/theme";
+import { syncConfig } from "@/lib/checklist/sync";
 import type { List } from "@/lib/checklist/types";
 
 function useChecklist() {
@@ -44,6 +45,11 @@ function ListMenu() {
   const [menuId, setMenuId] = useState<string | null>(null);
   const [armed, setArmed] = useState(false);
   const menu = lists.find((list) => list.id === menuId) ?? null;
+  useEffect(() => {
+    if (!armed) return;
+    const id = window.setTimeout(() => setArmed(false), 4000);
+    return () => window.clearTimeout(id);
+  }, [armed]);
 
   function openMenu(list: List) {
     setMenuId(list.id);
@@ -121,63 +127,65 @@ function ListMenu() {
 
 function FireShiftPanel({ list }: { list: List }) {
   const state = useChecklist();
+  const [confirming, setConfirming] = useState(false);
+  const [result, setResult] = useState("");
+  const [canUndo, setCanUndo] = useState(false);
+  const native = isNativeShell() || state.calendar === "native";
   const record = [...list.shiftHistory].reverse().find((entry) => entry.day === list.lastShift?.day);
   const summary = list.lastShift
     ? `Last shift ${formatShiftDay(list.lastShift.day)}: ${list.lastShift.done} of ${list.lastShift.total}${record ? `, ${record.onTime} on time` : ""}`
     : "Last shift: not recorded yet";
+  useEffect(() => {
+    if (!confirming) return;
+    const id = window.setTimeout(() => setConfirming(false), 4000);
+    return () => window.clearTimeout(id);
+  }, [confirming]);
   return (
     <div className="flex flex-col gap-2 rounded-card border border-line bg-canvas p-3">
       <p>{summary}</p>
       <p className="fine text-muted">
         On a shift day this list clears at 9:00 AM Eastern, once. A shift day is a calendar event titled “{state.settings.shiftMatch}”.
       </p>
-      <button type="button" className="min-h-14 rounded-card bg-accent px-3 text-on-accent" onClick={() => startFireList()}>
-        Start list
-      </button>
-    </div>
-  );
-}
-
-function ListThemePicker({ list }: { list: List }) {
-  const state = useChecklist();
-  const selected = listSelection(list.theme);
-  const saved = state.settings.customThemes.filter((theme) => theme.id !== "custom-draft");
-  return (
-    <div role="radiogroup" aria-label={`${list.name} theme`} className="flex flex-wrap gap-2">
-      <button
-        type="button"
-        role="radio"
-        aria-checked={selected === "default"}
-        className={`min-h-11 rounded-card border px-3 ${selected === "default" ? "border-accent bg-canvas" : "border-line bg-canvas"}`}
-        onClick={() => setListTheme(list.id, null)}
-      >
-        Use app default
-      </button>
-      {PRESET_LABELS.map((theme) => (
+      {native ? (
+        <p>Calendar isn't available on this phone. Calendar sign-in works in the browser version.</p>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
         <button
-          key={theme.id}
           type="button"
-          role="radio"
-          aria-checked={selected === theme.id}
-          className={`flex min-h-11 items-center gap-2 rounded-card border px-3 ${selected === theme.id ? "border-accent bg-canvas" : "border-line bg-canvas"}`}
-          onClick={() => setListTheme(list.id, theme.id)}
+          className="min-h-14 rounded-card bg-accent px-3 text-on-accent"
+          onClick={() => {
+            if (!confirming) {
+              setConfirming(true);
+              return;
+            }
+            const outcome = startFireList();
+            setResult(outcome.message);
+            setCanUndo(outcome.ok);
+            setConfirming(false);
+          }}
         >
-          <span className={`swatch swatch-${theme.id}`} aria-hidden="true" />
-          {theme.label}
+          {confirming ? "Clear every check?" : "Start list"}
         </button>
-      ))}
-      {saved.map((theme) => (
-        <button
-          key={theme.id}
-          type="button"
-          role="radio"
-          aria-checked={selected === theme.id}
-          className={`min-h-11 rounded-card border px-3 ${selected === theme.id ? "border-accent bg-canvas" : "border-line bg-canvas"}`}
-          onClick={() => setListThemeRecord(list.id, themeRecordFromCustom(theme))}
-        >
-          {theme.name}
-        </button>
-      ))}
+        <span className="text-muted">Manual start</span>
+        {canUndo ? (
+          <button
+            type="button"
+            className="min-h-14 rounded-card border border-line bg-canvas px-3"
+            onClick={() => {
+              const outcome = undoFireStart();
+              setResult(outcome.message);
+              setCanUndo(false);
+            }}
+          >
+            Undo
+          </button>
+        ) : null}
+        {result ? (
+          <p className="min-w-0 flex-1" role="status">
+            {result}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -186,6 +194,12 @@ function ColumnTools({ list }: { list: List }) {
   const [columnName, setColumnName] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const columns = columnsOf(list);
+  const destination = confirmId ? destinationColumn(columns, confirmId) : null;
+  useEffect(() => {
+    if (!confirmId) return;
+    const id = window.setTimeout(() => setConfirmId(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [confirmId]);
   return (
     <div className="flex flex-col gap-3">
       {columns.map((column, index) => (
@@ -229,7 +243,9 @@ function ColumnTools({ list }: { list: List }) {
           </div>
         </div>
       ))}
-      {confirmId ? <p className="text-muted">Tap Remove again to move those items into the next column.</p> : null}
+      {confirmId && destination ? (
+        <p className="text-muted">Tap Remove again to move those items into {destination.name}.</p>
+      ) : null}
       <form
         className="flex flex-col gap-2"
         onSubmit={(event) => {
@@ -293,7 +309,7 @@ function ShareList({ list }: { list: List }) {
       <button type="button" className="min-h-14 rounded-card border border-line bg-canvas" onClick={() => void shareCommand(list.slug)}>
         {list.shared ? "Copy this list's link" : "Share this list"}
       </button>
-      <p className="text-muted">Opens {list.name}. With sync on, every list in this space stays updated.</p>
+      <p className="text-muted">{shareBlurb(list.name, syncConfig() !== null)}</p>
       {link ? <input readOnly aria-label="Invite link" className="field" value={link} onFocus={(event) => event.currentTarget.select()} /> : null}
     </div>
   );
@@ -315,12 +331,13 @@ export function GearPanel({
     <>
       <button type="button" className="gear-scrim" aria-label="Close settings" onClick={onClose} />
       <div role="dialog" aria-modal="true" aria-label="Settings" className="gear-panel">
-        <div className="flex items-center justify-between gap-2">
+        <div className="gear-head">
           <h2 className="text-xl">Settings</h2>
-          <button type="button" aria-label="Close settings" className="min-h-11 min-w-11 rounded-card border border-line px-3" onClick={onClose}>
+          <button type="button" aria-label="Close settings" className="gear-close" onClick={onClose}>
             ×
           </button>
         </div>
+        <div className="gear-body">
         {dueText ? (
           <div className="due-banner due-banner-inline" role="status">
             <p>{dueText}</p>
@@ -340,11 +357,11 @@ export function GearPanel({
           </div>
         ) : null}
         {list?.kind === "fire-dept" ? <FireShiftPanel list={list} /> : null}
-        {list ? <ListThemePicker list={list} /> : null}
         {list ? <ColumnTools list={list} /> : null}
         {list ? <AddTask list={list} /> : null}
         {list ? <ShareList list={list} /> : null}
         <SettingsScreen embedded />
+        </div>
       </div>
     </>
   );

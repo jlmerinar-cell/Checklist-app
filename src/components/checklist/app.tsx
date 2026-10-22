@@ -31,13 +31,16 @@ import {
 import { GearPanel } from "@/components/checklist/gear-panel";
 import { RenameControl } from "@/components/checklist/rename-control";
 import { useChecklistRuntime } from "@/components/checklist/runtime";
-import { showListSwitcher } from "@/lib/checklist/chrome";
+import { isNativeShell } from "@/lib/checklist/calendar";
+import { emptyListCopy, listsForSwitcher, showListSwitcher } from "@/lib/checklist/chrome";
 import { switchCommand } from "@/lib/checklist/commands";
-import { dueTone, tasksCrossingDue } from "@/lib/checklist/countdown";
+import { dueTone, formatCountdown, tasksCrossingDue } from "@/lib/checklist/countdown";
 import { signalDue } from "@/lib/checklist/notify";
-import { recognizeSpeech } from "@/lib/checklist/speech";
+import { completion } from "@/lib/checklist/score";
+import { cancelSpeech, recognizeSpeech, SpeechUnavailableError, speechReady } from "@/lib/checklist/speech";
 import {
   activeList,
+  addTask,
   columnsOf,
   currentAppearance,
   deleteTask,
@@ -47,6 +50,7 @@ import {
   moveTaskByDrop,
   renameList,
   saveNotes,
+  setActive,
   setDone,
   setDueAt,
   setMessage,
@@ -57,7 +61,7 @@ import {
   visibleLists,
 } from "@/lib/checklist/store";
 import { applyAppearance, columnSlotFor, inkFor } from "@/lib/checklist/theme";
-import { clockFromIso, dueAtFromLocalClock, formatByTime, parseClock } from "@/lib/checklist/time";
+import { clockFromIso, dueAtFromLocalClock, parseClock } from "@/lib/checklist/time";
 import { foldAfterTap } from "@/lib/checklist/task-fold";
 import { handleVoiceTap } from "@/lib/checklist/voice";
 import type { List, Task } from "@/lib/checklist/types";
@@ -86,7 +90,7 @@ function collide(args: Parameters<typeof pointerWithin>[0]) {
 
 function ListSelect() {
   const state = useChecklist();
-  const lists = visibleLists(state.lists);
+  const lists = listsForSwitcher(visibleLists(state.lists), state.settings.dailyEnabled);
   if (!showListSwitcher(lists.length)) return null;
   const active = lists.find((list) => list.id === state.activeId) ?? null;
   return (
@@ -145,10 +149,16 @@ function TaskCard({
   const dueRef = useRef<HTMLInputElement>(null);
   const closing = useRef<"commit" | "cancel" | null>(null);
   useEffect(() => setLive(true), []);
+  useEffect(() => {
+    if (!armed) return;
+    const id = window.setTimeout(() => setArmed(false), 4000);
+    return () => window.clearTimeout(id);
+  }, [armed]);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
   const tone = live ? dueTone(task.dueAt, task.done, now) : "none";
-  const byTime = task.dueAt ? formatByTime(task.dueAt) : "";
-  const hasNotes = task.notes.trim().length > 0;
+  const countdown = task.dueAt ? formatCountdown(task.dueAt, now) : "";
+  const noteLine = task.notes.trim().split("\n")[0] ?? "";
+  const hasNotes = noteLine.length > 0;
 
   const focusOn = draft?.focus ?? null;
   useEffect(() => {
@@ -234,11 +244,18 @@ function TaskCard({
           {task.done ? <Check aria-hidden="true" strokeWidth={3} className="size-6" /> : null}
         </button>
         {draft ? null : (
-          <button type="button" className="task-title" aria-label={`Edit ${task.title}`} onClick={() => begin("title")}>
-            <span className={task.done ? "line-through decoration-2" : ""}>{task.title}</span>
-          </button>
+          <div className="task-copy">
+            <button type="button" className="task-title" aria-label={`Edit ${task.title}`} onClick={() => begin("title")}>
+              <span className={task.done ? "line-through decoration-2" : ""}>{task.title}</span>
+            </button>
+            {hasNotes && !expanded ? (
+              <button type="button" className="task-note" onClick={onToggle}>
+                {noteLine}
+              </button>
+            ) : null}
+          </div>
         )}
-        {!draft && byTime ? (
+        {!draft && countdown ? (
           <button
             type="button"
             className={`due-chip ${tone === "overdue" ? "due-overdue" : tone === "soon" ? "due-soon" : ""}`}
@@ -246,19 +263,10 @@ function TaskCard({
             aria-label={`Edit due time for ${task.title}`}
             onClick={() => begin("due")}
           >
-            {byTime}
+            {countdown}
           </button>
         ) : null}
         {hasNotes ? <span className="notes-dot" aria-label="Has notes" /> : null}
-        <button
-          type="button"
-          className={`task-chevron ${expanded ? "is-open" : ""}`}
-          aria-expanded={expanded}
-          aria-label={expanded ? `Collapse ${task.title}` : `Expand ${task.title}`}
-          onClick={onToggle}
-        >
-          <ChevronDown aria-hidden="true" className="size-5" />
-        </button>
       </div>
       {draft ? (
         <div
@@ -314,11 +322,25 @@ function TaskCard({
             <button type="button" className="tap flex-1 rounded-card border border-line px-3" onPointerDown={keepFocus} onClick={cancelEdit}>
               Cancel
             </button>
+            <button
+              type="button"
+              className="tap flex-1 rounded-card border border-line px-3"
+              onPointerDown={keepFocus}
+              onClick={() => {
+                saveDraft(false);
+                onToggle();
+              }}
+            >
+              Notes
+            </button>
           </div>
         </div>
       ) : null}
       {expanded ? (
         <div className="flex flex-col gap-3">
+          <button type="button" className="tap rounded-card border border-line px-3" aria-label={`Collapse ${task.title}`} onClick={onToggle}>
+            Hide notes
+          </button>
           <div className="flex items-start gap-2">
             <button
               type="button"
@@ -448,6 +470,7 @@ function ColumnBlock({
 }
 
 function ListPanel({ list, initialExpanded = [] }: { list: List; initialExpanded?: string[] }) {
+  const calendarOnThisPhone = !(isNativeShell() || useChecklist().calendar === "native");
   const columns = columnsOf(list);
   const sensors = useHoldSensors();
   const [openIds, setOpenIds] = useState(() => new Set(initialExpanded));
@@ -483,8 +506,76 @@ function ListPanel({ list, initialExpanded = [] }: { list: List; initialExpanded
           ))}
         </div>
       </DndContext>
-      {tasksIn(list).length === 0 ? <p className="text-muted">Nothing on this list yet.</p> : null}
+      {tasksIn(list).length === 0 ? (
+        <p className="text-muted">{emptyListCopy(list.kind, calendarOnThisPhone)}</p>
+      ) : null}
     </section>
+  );
+}
+
+function ListProgress({ list }: { list: List }) {
+  const stats = completion(list.tasks);
+  const label = `${stats.done} of ${stats.total}`;
+  return (
+    <div className="list-progress">
+      <p>{label}</p>
+      <div
+        className="h-3 overflow-hidden rounded-full bg-line"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={stats.pct}
+        aria-label={label}
+      >
+        <div className="h-full bg-accent" style={{ width: `${stats.pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function OverdueBanner({ list, now }: { list: List; now: Date }) {
+  const late = tasksIn(list).filter((task) => dueTone(task.dueAt, task.done, now) === "overdue");
+  if (!late.length) return null;
+  const names = late
+    .slice(0, 3)
+    .map((task) => task.title)
+    .join(", ");
+  return (
+    <p className="overdue-banner" role="status">
+      Overdue: {names}
+    </p>
+  );
+}
+
+function ListAddTask({ list }: { list: List }) {
+  const [draft, setDraft] = useState("");
+  return (
+    <form
+      className="flex flex-col gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const title = draft.trim();
+        if (!title) return;
+        addTask(list.id, title);
+        setDraft("");
+        setMessage(`Added ${title}.`);
+      }}
+    >
+      <label className="flex flex-col gap-2" htmlFor="add-task">
+        New task
+        <input
+          id="add-task"
+          className="field"
+          value={draft}
+          enterKeyHint="done"
+          placeholder="Add a task"
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      </label>
+      <button type="submit" className="min-h-14 rounded-card bg-accent px-3 text-on-accent">
+        Add
+      </button>
+    </form>
   );
 }
 
@@ -521,11 +612,15 @@ export function ChecklistApp({
   initialExpanded?: string[];
 }) {
   const state = useChecklist();
-  const list = activeList(state);
+  const shown = listsForSwitcher(visibleLists(state.lists), state.settings.dailyEnabled);
+  const active = activeList(state);
+  const list = active && shown.some((item) => item.id === active.id) ? active : (shown[0] ?? null);
   const [now, setNow] = useState(() => new Date());
   const [panel, setPanel] = useState(initialPanel);
   const [toast, setToast] = useState("");
+  const [listening, setListening] = useState(false);
   const [dueText, dismissDue] = useDueNotice();
+  const voiceCancel = useRef(false);
   const look = currentAppearance(state);
   const lookKey = `${look.source}:${look.texture}:${Object.values(look.colors).join()}`;
 
@@ -548,11 +643,83 @@ export function ChecklistApp({
     return () => window.removeEventListener("keydown", onKey);
   }, [panel]);
 
+  useEffect(() => {
+    if (!panel) return;
+    let pushed = false;
+    try {
+      window.history.pushState({ checklistSheet: true }, "");
+      pushed = true;
+    } catch {
+      pushed = false;
+    }
+    let consumed = false;
+    const onPop = () => {
+      consumed = true;
+      setPanel(false);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      if (!pushed || consumed || !window.history.state?.checklistSheet) return;
+      try {
+        window.history.back();
+      } catch {
+        /* the sheet entry is already gone */
+      }
+    };
+  }, [panel]);
+
+  useEffect(() => {
+    if (state.settings.dailyEnabled) return;
+    const current = state.lists.find((item) => item.id === state.activeId);
+    if (current?.kind !== "daily") return;
+    const next = shown[0];
+    if (next) setActive(next.id);
+  }, [state.settings.dailyEnabled, state.activeId, state.lists, shown]);
+
+  useEffect(() => {
+    if (!state.message) return;
+    setToast(state.message);
+    const id = window.setTimeout(() => {
+      setToast((current) => (current === state.message ? "" : current));
+    }, 5000);
+    return () => window.clearTimeout(id);
+  }, [state.message]);
+
   useChecklistRuntime();
 
   async function onVoice() {
-    const message = await handleVoiceTap(recognizeSpeech);
-    setToast(message);
+    if (listening) return;
+    if (!speechReady()) {
+      setToast("Speech isn't available on this phone.");
+      window.setTimeout(() => setToast(""), 4000);
+      return;
+    }
+    voiceCancel.current = false;
+    setListening(true);
+    setToast("Listening");
+    try {
+      const heard = await recognizeSpeech();
+      if (voiceCancel.current) {
+        setToast("Stopped listening.");
+      } else if (!heard || !heard.trim()) {
+        setToast("Didn't catch that.");
+      } else {
+        setToast(await handleVoiceTap(async () => heard));
+      }
+    } catch (error) {
+      setToast(error instanceof SpeechUnavailableError ? error.message : "Didn't catch that.");
+    } finally {
+      setListening(false);
+      window.setTimeout(() => setToast(""), 4000);
+    }
+  }
+
+  function cancelVoice() {
+    voiceCancel.current = true;
+    cancelSpeech();
+    setListening(false);
+    setToast("Stopped listening.");
     window.setTimeout(() => setToast(""), 4000);
   }
 
@@ -561,11 +728,22 @@ export function ChecklistApp({
       <main data-screen="list" className="screen mx-auto flex w-full max-w-3xl flex-col gap-4">
         <div className="flex flex-wrap items-center gap-2">
           <ListName list={list} />
-          <div className="ml-auto flex shrink-0 items-center gap-2">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             <ListSelect />
-            <button type="button" aria-label="Voice command" className="flex size-11 items-center justify-center rounded-card border border-line bg-surface" onClick={() => void onVoice()}>
-              <Mic aria-hidden="true" className="size-5" />
+            <button
+              type="button"
+              aria-label={listening ? "Listening" : "Voice command"}
+              aria-pressed={listening}
+              className={listening ? "listen-mic" : "flex size-11 items-center justify-center rounded-card border border-line bg-surface"}
+              onClick={() => void onVoice()}
+            >
+              {listening ? "Listening" : <Mic aria-hidden="true" className="size-5" />}
             </button>
+            {listening ? (
+              <button type="button" className="tap rounded-card border border-line bg-surface px-3" onClick={cancelVoice}>
+                Cancel
+              </button>
+            ) : null}
             <button
               type="button"
               aria-label="Settings"
@@ -577,6 +755,9 @@ export function ChecklistApp({
             </button>
           </div>
         </div>
+        {list ? <ListProgress list={list} /> : null}
+        {list ? <OverdueBanner list={list} now={now} /> : null}
+        {list ? <ListAddTask list={list} /> : null}
         {list ? <ListPanel list={list} initialExpanded={initialExpanded} /> : <p className="text-muted">Add a list to start.</p>}
       </main>
       {panel ? <GearPanel list={list} dueText={dueText} onClose={() => setPanel(false)} onDismissDue={dismissDue} /> : null}

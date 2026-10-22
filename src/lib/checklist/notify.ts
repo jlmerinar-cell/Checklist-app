@@ -198,6 +198,31 @@ function onDevice(): boolean {
   return isNativeShell();
 }
 
+function notificationWord(value: string): "granted" | "denied" | "prompt" {
+  if (value === "granted" || value === "denied") return value;
+  if (value === "prompt" || value === "default") return "prompt";
+  return "denied";
+}
+
+/** Ask the phone (Android) or the browser for notification permission. */
+export async function requestNotificationAccess(): Promise<"granted" | "denied" | "prompt" | "unavailable"> {
+  try {
+    if (onDevice()) {
+      const notifications = await plugin();
+      const current = await notifications.checkPermissions();
+      if (current.display === "granted") return "granted";
+      const next = await notifications.requestPermissions();
+      return notificationWord(next.display);
+    }
+    if (typeof Notification === "undefined") return "unavailable";
+    if (Notification.permission === "granted") return "granted";
+    if (Notification.permission === "denied") return "denied";
+    return notificationWord(await Notification.requestPermission());
+  } catch {
+    return "unavailable";
+  }
+}
+
 async function allowed(): Promise<boolean> {
   try {
     if (onDevice()) {
