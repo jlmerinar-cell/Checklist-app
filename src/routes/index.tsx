@@ -1,8 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ChecklistScreen } from "@/components/checklist/ChecklistScreen";
+import { ChecklistApp } from "@/components/checklist/app";
 
-export const Route = createFileRoute("/")({ component: Home });
-
-function Home() {
-  return <ChecklistScreen />;
-}
+export const Route = createFileRoute("/")({ component: ChecklistApp });

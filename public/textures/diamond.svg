@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.72"/>
+      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.55"/>
+    </linearGradient>
+  </defs>
+  <path d="M30 8 L46 24 L30 40 L14 24 Z" fill="url(#plate)" stroke="#000000" stroke-opacity="0.4" stroke-width="1.4"/>
+  <path d="M90 8 L106 24 L90 40 L74 24 Z" fill="url(#plate)" stroke="#000000" stroke-opacity="0.4" stroke-width="1.4"/>
+  <path d="M60 38 L76 54 L60 70 L44 54 Z" fill="url(#plate)" stroke="#000000" stroke-opacity="0.4" stroke-width="1.4"/>
+  <path d="M30 68 L46 84 L30 100 L14 84 Z" fill="url(#plate)" stroke="#000000" stroke-opacity="0.4" stroke-width="1.4"/>
+  <path d="M90 68 L106 84 L90 100 L74 84 Z" fill="url(#plate)" stroke="#000000" stroke-opacity="0.4" stroke-width="1.4"/>
+</svg>
