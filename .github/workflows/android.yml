@@ -58,17 +58,25 @@ jobs:
           npx cap sync android
           node scripts/android-version.mjs
 
-      # Standard debug keystore path and passwords. Gradle then signs assembleDebug
-      # with this file instead of generating a new key on each runner.
+      # Release APKs are signed off GitHub. These steps run only when the
+      # optional repository secret is present; otherwise Gradle uses a runner key.
+      - name: Detect debug keystore secret
+        id: keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "${ANDROID_KEYSTORE_BASE64}" ]; then
+            echo "set=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "set=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install debug keystore
+        if: steps.keystore.outputs.set == 'true'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
-          if [ -z "${ANDROID_KEYSTORE_BASE64}" ]; then
-            echo "ANDROID_KEYSTORE_BASE64 is not set" >&2
-            exit 1
-          fi
           mkdir -p "${HOME}/.android"
           printf '%s' "${ANDROID_KEYSTORE_BASE64}" | tr -d '[:space:]' | base64 -d > "${HOME}/.android/debug.keystore"
           chmod 600 "${HOME}/.android/debug.keystore"
@@ -83,6 +91,7 @@ jobs:
         run: cp android/app/build/outputs/apk/debug/app-debug.apk Checklist-debug.apk
 
       - name: Confirm debug APK signing certificate
+        if: steps.keystore.outputs.set == 'true'
         run: |
           set -euo pipefail
           fp="$(keytool -printcert -jarfile Checklist-debug.apk | awk -F': ' '/SHA256:/{gsub(/:/,"",$2); print tolower($2); exit}')"
