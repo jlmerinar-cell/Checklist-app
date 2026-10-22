@@ -20,7 +20,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "build:spa": "vite build -c vite.spa.config.ts",
-    "cap:sync": "npm run build:spa && cap sync android"
+    "cap:sync": "npm run build:spa && cap sync android && node scripts/android-version.mjs"
   },
   "dependencies": {
     "@capacitor-community/speech-recognition": "^7.0.1",
@@ -105,5 +105,5 @@
     "prettier": "^3.4.0",
     "typescript-eslint": "^8.56.1"
   },
-  "version": "1.4.1"
+  "version": "1.4.2"
 }
