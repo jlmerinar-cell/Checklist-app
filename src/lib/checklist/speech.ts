@@ -29,6 +29,8 @@ type WebRecognition = {
   onresult: ((event: WebResult) => void) | null;
   onerror: (() => void) | null;
   start: () => void;
+  stop?: () => void;
+  abort?: () => void;
 };
 
 type WebWindow = Window & {
@@ -47,6 +49,31 @@ function isNativeSpeech(): boolean {
   return window.Capacitor?.isNativePlatform?.() === true;
 }
 
+export class SpeechUnavailableError extends Error {
+  constructor() {
+    super("Speech isn't available on this phone.");
+    this.name = "SpeechUnavailableError";
+  }
+}
+
+let listenGeneration = 0;
+let stopCurrent: (() => void) | null = null;
+
+/** Stop the recognizer that is running now. */
+export function cancelSpeech(): void {
+  listenGeneration += 1;
+  const stop = stopCurrent;
+  stopCurrent = null;
+  stop?.();
+}
+
+export function speechReady(): boolean {
+  if (typeof window === "undefined") return false;
+  if (isNativeSpeech()) return true;
+  const host = window as WebWindow;
+  return Boolean(host.SpeechRecognition ?? host.webkitSpeechRecognition);
+}
+
 async function loadCapacitorPlugin(): Promise<SpeechSession> {
   const mod = await import("@capacitor-community/speech-recognition");
   return mod.SpeechRecognition as SpeechSession;
@@ -62,23 +89,30 @@ export async function listenWith(
 ): Promise<string | null> {
   const timeoutMs = timing.timeoutMs ?? 12000;
   const settleMs = timing.settleMs ?? 400;
+  const generation = listenGeneration;
+  let settled = false;
+  let finish: (value: string | null) => void = () => {};
+  const result = new Promise<string | null>((resolve) => {
+    finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+  });
+  const stop = () => {
+    if (stopCurrent === stop) stopCurrent = null;
+    finish(null);
+  };
+  stopCurrent = stop;
+  if (listenGeneration !== generation) return null;
   const availability = await speech.available();
+  if (listenGeneration !== generation) return null;
   if (!availability.available) return null;
   let permission = await speech.checkPermissions();
   if (permission.speechRecognition !== "granted") permission = await speech.requestPermissions();
   if (permission.speechRecognition !== "granted") return null;
 
   let heard = "";
-  let finished = false;
-  let settle: (value: string | null) => void = () => {};
-  const result = new Promise<string | null>((resolve) => {
-    settle = resolve;
-  });
-  const finish = (value: string | null) => {
-    if (finished) return;
-    finished = true;
-    settle(value);
-  };
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   const partial = await speech.addListener("partialResults", (data) => {
     const next = data.matches?.[0]?.trim();
@@ -109,6 +143,7 @@ export async function listenWith(
   } finally {
     clearTimeout(timer);
     clearTimeout(settleTimer);
+    if (stopCurrent === stop) stopCurrent = null;
     await partial.remove();
     await state.remove();
     try {
@@ -120,10 +155,11 @@ export async function listenWith(
 }
 
 function recognizeWeb(): Promise<string | null> {
-  if (typeof window === "undefined") return Promise.resolve(null);
+  if (typeof window === "undefined") return Promise.reject(new SpeechUnavailableError());
   const host = window as WebWindow;
   const Ctor = host.SpeechRecognition ?? host.webkitSpeechRecognition;
-  if (!Ctor) return Promise.resolve(null);
+  if (!Ctor) return Promise.reject(new SpeechUnavailableError());
+  const generation = listenGeneration;
   return new Promise((resolve) => {
     let settled = false;
     const finish = (value: string | null) => {
@@ -133,6 +169,20 @@ function recognizeWeb(): Promise<string | null> {
     };
     try {
       const recognition = new Ctor();
+      const stop = () => {
+        if (stopCurrent === stop) stopCurrent = null;
+        try {
+          recognition.abort?.();
+        } catch {
+          /* already stopped */
+        }
+        finish(null);
+      };
+      stopCurrent = stop;
+      if (listenGeneration !== generation) {
+        stop();
+        return;
+      }
       recognition.lang = "en-US";
       recognition.interimResults = false;
       recognition.maxAlternatives = 1;
@@ -151,10 +201,16 @@ function recognizeWeb(): Promise<string | null> {
 export async function recognizeSpeech(deps?: SpeechDeps): Promise<string | null> {
   const native = deps?.native ?? isNativeSpeech();
   try {
-    if (native) return await listenWith(deps?.plugin ?? (await loadCapacitorPlugin()));
+    if (native) {
+      const speech = deps?.plugin ?? (await loadCapacitorPlugin());
+      const availability = await speech.available();
+      if (!availability.available) throw new SpeechUnavailableError();
+      return await listenWith(speech);
+    }
     if (deps?.web) return await deps.web();
     return await recognizeWeb();
-  } catch {
+  } catch (error) {
+    if (error instanceof SpeechUnavailableError) throw error;
     return null;
   }
 }

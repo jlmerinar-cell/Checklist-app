@@ -23,9 +23,12 @@ test("main screen is the checklist, the switcher, the mic, and the gear", () => 
   assert.match(list, /aria-label="Edit Check hydrant map"/);
   assert.match(list, /aria-label="Rename Fire department"/);
   assert.match(list, /aria-label="Edit due time for Check hydrant map"/);
-  assert.match(list, /aria-label="Expand Check hydrant map"/);
+  assert.equal(list.includes('aria-label="Expand Check hydrant map"'), false);
+  assert.match(list, /Quincy Hill: black bonnets/);
   assert.match(list, /aria-label="Has notes"/);
   assert.match(list, /data-due-chip=/);
+  assert.match(list, /2 of 6/);
+  assert.match(list, /id="add-task"/);
   assert.equal(list.includes('aria-label="Notes for Check hydrant map"'), false);
   assert.equal(list.includes('aria-label="Due time for Check hydrant map"'), false);
   assert.equal(list.includes("Drag to reorder"), false);
@@ -40,6 +43,7 @@ test("main screen is the checklist, the switcher, the mic, and the gear", () => 
   assert.match(list, /data-column="evening"/);
   assert.match(list, /class="col-band"/);
   assert.match(list, /role="checkbox"/);
+  assert.equal(list.includes(">Daily<"), false);
   assert.equal(list.includes("Saturday open until 5"), false);
   assert.equal(list.includes("EMT patient assessment"), false);
   assert.equal(list.includes('href="/settings"'), false);
@@ -49,15 +53,15 @@ test("main screen is the checklist, the switcher, the mic, and the gear", () => 
   assert.equal(list.includes("Diamond plate"), false);
   assert.equal(list.includes("Brushed metal"), false);
   assert.equal(list.includes("Add list"), false);
-  assert.equal(list.includes("progressbar"), false);
-  assert.equal(list.includes("New task"), false);
+  assert.match(list, /progressbar/);
+  assert.match(list, /New task/);
   assert.equal(list.includes("Shift calendar"), false);
   assert.equal(list.includes('id="checklist-command"'), false);
   assert.equal(list.includes("Sync setup"), false);
 });
 
 test("a task starts collapsed, expands, collapses, and a check does not expand it", () => {
-  assert.match(list, /aria-label="Expand Check hydrant map"/);
+  assert.equal(list.includes('aria-label="Expand Check hydrant map"'), false);
   assert.equal(list.includes('aria-label="Notes for Check hydrant map"'), false);
   assert.match(expanded, /aria-label="Collapse Check hydrant map"/);
   assert.match(expanded, new RegExp(`data-task-id="${HYDRANT}"[^>]*data-expanded="true"`));
@@ -102,6 +106,13 @@ test("the gear opens every setting and a theme change sticks", () => {
   assert.match(open, /role="progressbar"/);
   assert.match(open, /New task/);
   assert.match(open, /Use app default/);
+  assert.match(open, /Manual start/);
+  assert.match(open, /Save a backup/);
+  assert.match(open, /Open a backup/);
+  assert.match(open, />Theme</);
+  assert.ok(open.indexOf(">Theme<") > open.indexOf("Notifications"));
+  assert.ok(open.indexOf(">Theme<") > open.indexOf("Shift calendar"));
+  assert.equal(open.includes("<details open"), false);
   setTheme("pink");
   assert.equal(getState().settings.defaultTheme, "pink");
   assert.equal(getState().settings.texture, "floral");
@@ -127,6 +138,12 @@ test("settings keeps app controls off the task card", () => {
   assert.match(settings, /Shift day title/);
   assert.match(settings, /Notifications/);
   assert.match(settings, /Morning daily/);
+  assert.match(settings, /Save a backup/);
+  assert.match(settings, /Open a backup/);
+  assert.match(settings, />Theme</);
+  assert.ok(settings.indexOf(">Theme<") > settings.indexOf("Notifications"));
+  assert.ok(settings.indexOf(">Theme<") > settings.indexOf("Shift calendar"));
+  assert.equal(settings.includes(">Download<"), false);
   assert.match(settings, /Sync setup/);
   assert.equal(settings.includes("bot access"), false);
   assert.equal(settings.includes("curl "), false);

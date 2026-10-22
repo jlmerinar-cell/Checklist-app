@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { listenWith, recognizeSpeech, type SpeechSession } from "./speech.ts";
+import { cancelSpeech, listenWith, recognizeSpeech, SpeechUnavailableError, type SpeechSession } from "./speech.ts";
 
 const manifest = readFileSync(
   new URL("../../../node_modules/@capacitor-community/speech-recognition/android/src/main/AndroidManifest.xml", import.meta.url),
@@ -106,6 +106,22 @@ describe("speech permissions and availability", () => {
     });
     assert.equal(heard, "check hydrant");
     assert.equal(loaded, false);
+  });
+
+  it("says speech is unavailable when the Android recognizer is missing", async () => {
+    const { speech, calls } = session({ available: async () => ({ available: false }) });
+    await assert.rejects(() => recognizeSpeech({ native: true, plugin: speech }), SpeechUnavailableError);
+    assert.equal(calls.start.length, 0);
+  });
+
+  it("cancelSpeech ends a listen that has not heard anything", async () => {
+    const { speech } = session({
+      checkPermissions: async () => ({ speechRecognition: "granted" }),
+      start: async () => ({ matches: [] }),
+    });
+    const pending = listenWith(speech, { timeoutMs: 5000, settleMs: 50 });
+    cancelSpeech();
+    assert.equal(await pending, null);
   });
 
   it("uses the injected native plugin when the shell is Android", async () => {

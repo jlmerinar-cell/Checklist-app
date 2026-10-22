@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { connectCalendar, isNativeShell, listCalendars } from "@/lib/checklist/calendar";
-import { downloadCommand, execCommand } from "@/lib/checklist/commands";
+import { downloadCommand, execCommand, importCommand } from "@/lib/checklist/commands";
+import { requestNotificationAccess } from "@/lib/checklist/notify";
 import { setDaily } from "@/lib/checklist/daily";
 import { SETUP_SQL } from "@/lib/checklist/setup-sql";
 import {
@@ -76,11 +77,28 @@ export function SettingsScreen({ embedded = false }: { embedded?: boolean }) {
         </header>
       )}
       <StatusBlock />
-      <section aria-label="Theme editor" className="flex flex-col gap-3 rounded-card border border-line bg-surface p-3">
+      <DailyBlock enabled={state.settings.dailyEnabled} />
+      <NotificationsBlock />
+      <ShiftBlock />
+      <details className="rounded-card border border-line bg-surface p-3">
+        <summary className="min-h-11 cursor-pointer">Theme</summary>
+        <section aria-label="Theme editor" className="mt-3 flex flex-col gap-3">
         <h2>Theme editor</h2>
         <p className="fine text-muted">
           Built-in themes stay as presets. Saved colors and a texture can be the app default or one list. Use app default on a list clears that list’s override.
         </p>
+        {target !== "app" ? (
+          <button
+            type="button"
+            className="min-h-14 rounded-card border border-line bg-canvas px-3"
+            onClick={() => {
+              setEditingId(null);
+              setListTheme(target, null);
+            }}
+          >
+            Use app default
+          </button>
+        ) : null}
         <label className="flex flex-col gap-2">
           Apply to
           <select className="field" aria-label="Theme target" value={target} onChange={(event) => setTarget(event.target.value)}>
@@ -225,13 +243,31 @@ export function SettingsScreen({ embedded = false }: { embedded?: boolean }) {
         ) : (
           <p className="text-muted">No saved themes yet. Pick colors, name them, and save.</p>
         )}
-      </section>
-      <DailyBlock enabled={state.settings.dailyEnabled} />
-      <NotificationsBlock />
-      <ShiftBlock />
-      <button type="button" onClick={() => downloadCommand()} className="min-h-14 rounded-card border border-line bg-surface">
-        Download
-      </button>
+        </section>
+      </details>
+      <div className="flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={() => setMessage(downloadCommand().message)}
+          className="min-h-14 rounded-card border border-line bg-surface"
+        >
+          Save a backup
+        </button>
+        <label className="backup-open min-h-14 rounded-card border border-line bg-surface">
+          Open a backup
+          <input
+            type="file"
+            accept="application/json,.json"
+            aria-label="Open a backup"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (!file) return;
+              void file.text().then((raw) => setMessage(importCommand(raw).message));
+            }}
+          />
+        </label>
+      </div>
       <CommandBlock message={state.message} />
       <SetupBlock />
     </div>
@@ -308,11 +344,16 @@ function NotificationsBlock() {
         type="button"
         className="min-h-14 rounded-card border border-line bg-canvas px-3"
         onClick={() => {
-          if (typeof Notification === "undefined") {
-            setNote("This browser has no notification permission to grant.");
-            return;
-          }
-          void Notification.requestPermission().then((result) => setNote(`Notifications are ${result}.`));
+          void requestNotificationAccess().then((result) => {
+            const text =
+              result === "unavailable"
+                ? isNativeShell()
+                  ? "This phone has no notification permission to grant."
+                  : "This browser has no notification permission to grant."
+                : `Notifications are ${result}.`;
+            setNote(text);
+            setMessage(text);
+          });
         }}
       >
         Allow notifications

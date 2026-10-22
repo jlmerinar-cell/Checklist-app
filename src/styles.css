@@ -121,9 +121,17 @@ body.theme-rugged {
   --radius-card: 0.5rem;
 }
 
+html,
+body {
+  overflow-x: clip;
+  max-width: 100%;
+}
+
 .screen {
   position: relative;
   z-index: 1;
+  overflow-x: clip;
+  max-width: 100%;
   padding-top: max(1rem, env(safe-area-inset-top));
   padding-bottom: max(5.5rem, calc(env(safe-area-inset-bottom) + 4.5rem));
   padding-left: max(0.75rem, env(safe-area-inset-left));
@@ -264,6 +272,8 @@ body.theme-custom.scheme-light {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
   border-radius: var(--radius-card);
   background: var(--color-line);
 }
@@ -274,6 +284,8 @@ body.theme-custom.scheme-light {
   border-radius: var(--radius-card);
   background: color-mix(in srgb, var(--col, var(--color-surface)) 46%, var(--color-surface));
   padding: 0.6rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .col-band {
@@ -480,19 +492,35 @@ body[data-texture="chevron"],
   padding: 0.2rem 0.45rem;
 }
 
+.task-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .task-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.35rem;
   min-height: 44px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.task-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 button.task-title {
   flex: 1;
+  width: 100%;
   min-width: 0;
   min-height: 44px;
   justify-content: flex-start;
-  padding: 0 0.15rem;
+  align-items: flex-start;
+  padding: 0.15rem;
   background: transparent;
   background-image: none;
   box-shadow: none;
@@ -502,6 +530,28 @@ button.task-title {
 }
 
 button.task-title span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+button.task-note {
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0 0.15rem 0.2rem;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: var(--color-muted);
+  text-align: left;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -563,12 +613,17 @@ p.list-name {
 }
 
 button.due-chip {
+  flex: 0 1 auto;
+  max-width: 42%;
   min-height: 44px;
   min-width: 44px;
   box-shadow: none;
   background-image: none;
   background: transparent;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
+  white-space: normal;
+  line-height: 1.15;
+  text-align: right;
 }
 
 button.tap {
@@ -592,13 +647,12 @@ button.task-chevron.is-open {
 }
 
 .due-chip {
-  flex: none;
-  max-width: 5.5rem;
+  flex: 0 1 auto;
+  max-width: 42%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.68rem;
-  line-height: 1;
+  white-space: normal;
+  font-size: 0.8rem;
+  line-height: 1.15;
   font-weight: 700;
   padding: 0.2rem 0.35rem;
   border-radius: 999px;
@@ -651,10 +705,83 @@ body:not(.scheme-light) .due-overdue {
   overflow: auto;
   background: var(--color-surface);
   color: var(--color-ink);
-  padding: max(0.75rem, env(safe-area-inset-top)) 1rem 2rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.gear-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  background: var(--color-surface);
+  padding: max(0.75rem, env(safe-area-inset-top)) 1rem 0.75rem;
+}
+
+button.gear-close {
+  min-height: 3rem;
+  min-width: 3rem;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--color-line);
+  padding: 0 0.75rem;
+}
+
+.gear-body {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  padding: 0 1rem 2rem;
+}
+
+.list-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.list-progress p {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.overdue-banner {
+  margin: 0;
+  border-radius: var(--radius-card);
+  background: #9b1028;
+  color: #fff;
+  padding: 0.6rem 0.8rem;
+}
+
+button.listen-mic {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 0.7rem;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+
+.backup-open {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.backup-open input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
 }
 
 .voice-toast {

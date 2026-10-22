@@ -22,6 +22,7 @@ import {
   uniqueSlug,
   visibleLists,
 } from "./store.ts";
+import { syncConfig } from "./sync.ts";
 import { dueAtFromParts, isDateOnly } from "./time.ts";
 import { NOTES_LIMIT, TITLE_LIMIT, type List, type Task, type ThemeId } from "./types.ts";
 
@@ -324,6 +325,11 @@ export function importCommand(raw: string): CmdResult {
   return ok(`Imported ${lists.length} lists.`);
 }
 
+export function shareBlurb(name: string, synced: boolean): string {
+  if (synced) return `Opens ${name}. With sync on, every list in this space stays updated.`;
+  return `Opens ${name} on this phone only. There is no sync, so this link does not update other phones.`;
+}
+
 export function listLink(list: List): string {
   if (typeof window === "undefined") return `?list=${encodeURIComponent(list.slug)}`;
   const url = new URL(window.location.href);
@@ -348,7 +354,7 @@ export async function shareCommand(query?: string): Promise<CmdResult> {
     copied = false;
   }
   const lead = copied ? "Link copied. " : `Link: ${link} `;
-  return ok(`${lead}Opens ${list.name}. With sync on, every list in this space stays updated.`, list.id);
+  return ok(`${lead}${shareBlurb(list.name, syncConfig() !== null)}`, list.id);
 }
 
 function positionOf(words: string[]): { index: number; position: number } | { error: string } {

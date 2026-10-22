@@ -77,10 +77,15 @@ export function formatDue(iso: string): string {
   });
 }
 
-/** Today at a local clock time, as an ISO timestamp. */
+/**
+ * The next time this local clock comes up.
+ * A bare time that is already past today rolls forward to tomorrow.
+ * A time that is exactly now stays today.
+ */
 export function dueAtFromLocalClock(hours: number, minutes: number, now = new Date()): string {
   const date = new Date(now);
   date.setHours(hours, minutes, 0, 0);
+  if (date.getTime() < now.getTime()) date.setDate(date.getDate() + 1);
   return date.toISOString();
 }
 
