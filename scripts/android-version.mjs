@@ -1,5 +1,17 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
+const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+const versionName = pkg.version;
+const versionCode = pkg.androidVersionCode;
+if (typeof versionName !== "string" || !/^\d+\.\d+\.\d+$/.test(versionName)) {
+  console.error("package.json version must be MAJOR.MINOR.PATCH");
+  process.exit(1);
+}
+if (!Number.isInteger(versionCode) || versionCode < 1) {
+  console.error("package.json androidVersionCode must be a positive integer");
+  process.exit(1);
+}
+
 const path = "android/app/build.gradle";
 const text = readFileSync(path, "utf8");
 if (!/versionCode\s+\d+/.test(text) || !/versionName\s+"[^"]*"/.test(text)) {
@@ -7,7 +19,7 @@ if (!/versionCode\s+\d+/.test(text) || !/versionName\s+"[^"]*"/.test(text)) {
   process.exit(1);
 }
 const next = text
-  .replace(/versionCode\s+\d+/, "versionCode 7")
-  .replace(/versionName\s+"[^"]*"/, 'versionName "1.4.2"');
+  .replace(/versionCode\s+\d+/, `versionCode ${versionCode}`)
+  .replace(/versionName\s+"[^"]*"/, `versionName "${versionName}"`);
 writeFileSync(path, next);
-console.log('Set Android versionName 1.4.2, versionCode 7');
+console.log(`Set Android versionName ${versionName}, versionCode ${versionCode}`);

@@ -1,6 +1,6 @@
 # Checklist
 
-Phone-first checklists for the fire department, the shop, and everything else. Version 1.4.2. Data stays on this phone first. Supabase sync is optional.
+Phone-first checklists for the fire department, the shop, and everything else. Version 1.4.5. Data stays on this phone first. Supabase sync is optional.
 
 ## Run locally
 
