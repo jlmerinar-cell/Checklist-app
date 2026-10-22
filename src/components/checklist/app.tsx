@@ -17,8 +17,19 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Check, ChevronDown, GripVertical, Mic, Settings } from "lucide-react";
-import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type FocusEvent as ReactFocusEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { GearPanel } from "@/components/checklist/gear-panel";
+import { RenameControl } from "@/components/checklist/rename-control";
 import { useChecklistRuntime } from "@/components/checklist/runtime";
 import { showListSwitcher } from "@/lib/checklist/chrome";
 import { switchCommand } from "@/lib/checklist/commands";
@@ -34,20 +45,19 @@ import {
   getState,
   moveTaskByDir,
   moveTaskByDrop,
+  renameList,
   saveNotes,
   setDone,
   setDueAt,
-  setEditing,
   setMessage,
   setNotesDraft,
-  setTaskColumn,
   setTitle,
   subscribe,
   tasksIn,
   visibleLists,
 } from "@/lib/checklist/store";
 import { applyAppearance, columnSlotFor, inkFor } from "@/lib/checklist/theme";
-import { clockFromIso, dueAtFromLocalClock, formatByTime, fromDatetimeLocal, parseClock, toDatetimeLocal } from "@/lib/checklist/time";
+import { clockFromIso, dueAtFromLocalClock, formatByTime, parseClock } from "@/lib/checklist/time";
 import { foldAfterTap } from "@/lib/checklist/task-fold";
 import { handleVoiceTap } from "@/lib/checklist/voice";
 import type { List, Task } from "@/lib/checklist/types";
@@ -80,21 +90,35 @@ function ListSelect() {
   if (!showListSwitcher(lists.length)) return null;
   const active = lists.find((list) => list.id === state.activeId) ?? null;
   return (
-    <select
-      aria-label="Switch list"
-      className="field min-h-11 min-w-0 flex-1"
-      value={active?.id ?? ""}
-      onChange={(event) => {
-        const next = lists.find((list) => list.id === event.target.value);
-        if (next) switchCommand(next.slug);
-      }}
-    >
-      {lists.map((list) => (
-        <option key={list.id} value={list.id}>
-          {list.name}
-        </option>
-      ))}
-    </select>
+    <div className="list-switch">
+      <ChevronDown aria-hidden="true" className="size-6" />
+      <select
+        aria-label="Switch list"
+        value={active?.id ?? ""}
+        onChange={(event) => {
+          const next = lists.find((list) => list.id === event.target.value);
+          if (next) switchCommand(next.slug);
+        }}
+      >
+        {lists.map((list) => (
+          <option key={list.id} value={list.id}>
+            {list.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function ListName({ list }: { list: List | null }) {
+  if (!list) return null;
+  return (
+    <RenameControl
+      value={list.name}
+      disabled={list.system}
+      className="list-name"
+      onCommit={(next) => renameList(list.id, next)}
+    />
   );
 }
 
@@ -114,18 +138,86 @@ function TaskCard({
   const now = useNow();
   const [armed, setArmed] = useState(false);
   const [live, setLive] = useState(false);
+  const [draft, setDraft] = useState<{ title: string; due: string; focus: "title" | "due" } | null>(null);
+  const [session, setSession] = useState(0);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const dueRef = useRef<HTMLInputElement>(null);
+  const closing = useRef<"commit" | "cancel" | null>(null);
   useEffect(() => setLive(true), []);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
   const tone = live ? dueTone(task.dueAt, task.done, now) : "none";
   const byTime = task.dueAt ? formatByTime(task.dueAt) : "";
   const hasNotes = task.notes.trim().length > 0;
+
+  const focusOn = draft?.focus ?? null;
+  useEffect(() => {
+    if (!focusOn) return;
+    const node = focusOn === "due" ? dueRef.current : titleRef.current;
+    node?.focus();
+    if (focusOn === "title") titleRef.current?.select();
+  }, [session, focusOn]);
+
+  function begin(focus: "title" | "due") {
+    closing.current = null;
+    setDraft({ title: task.title, due: clockFromIso(task.dueAt), focus });
+    setSession((value) => value + 1);
+  }
+
+  function saveDraft(close: boolean) {
+    if (!draft || closing.current === "cancel") return;
+    const nextTitle = draft.title.trim() || task.title;
+    if (nextTitle !== task.title) setTitle(list.id, task.id, nextTitle);
+    if (draft.due !== clockFromIso(task.dueAt)) {
+      if (!draft.due) setDueAt(list.id, task.id, null);
+      else {
+        const parsed = parseClock(draft.due);
+        if (parsed) setDueAt(list.id, task.id, dueAtFromLocalClock(parsed.hours, parsed.minutes, now));
+      }
+    }
+    if (close) {
+      closing.current = "commit";
+      setDraft(null);
+      return;
+    }
+    setDraft((current) => (current ? { ...current, title: nextTitle } : current));
+  }
+
+  function cancelEdit() {
+    closing.current = "cancel";
+    setDraft(null);
+  }
+
+  function onEditorBlur(event: ReactFocusEvent<HTMLDivElement>) {
+    if (closing.current) return;
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    saveDraft(true);
+  }
+
+  function onEditorKey(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveDraft(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelEdit();
+    }
+  }
+
+  function keepFocus(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+  }
+
   return (
     <article
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       data-task-id={task.id}
       data-expanded={expanded ? "true" : "false"}
-      className={`task-card flex flex-col rounded-card border border-line bg-surface ${expanded ? "gap-3 p-3" : "task-card-collapsed"} ${isDragging ? "opacity-60" : ""}`}
+      data-editing={draft ? "true" : "false"}
+      className={`task-card flex flex-col rounded-card border border-line bg-surface ${expanded || draft ? "gap-3 p-3" : "task-card-collapsed"} ${isDragging ? "opacity-60" : ""}`}
     >
       <div className="task-row">
         <button
@@ -141,13 +233,21 @@ function TaskCard({
         >
           {task.done ? <Check aria-hidden="true" strokeWidth={3} className="size-6" /> : null}
         </button>
-        <button type="button" className="task-title" aria-expanded={expanded} onClick={onToggle}>
-          <span className={task.done ? "line-through decoration-2" : ""}>{task.title}</span>
-        </button>
-        {byTime ? (
-          <span className={`due-chip ${tone === "overdue" ? "due-overdue" : tone === "soon" ? "due-soon" : ""}`} data-due-chip={tone}>
+        {draft ? null : (
+          <button type="button" className="task-title" aria-label={`Edit ${task.title}`} onClick={() => begin("title")}>
+            <span className={task.done ? "line-through decoration-2" : ""}>{task.title}</span>
+          </button>
+        )}
+        {!draft && byTime ? (
+          <button
+            type="button"
+            className={`due-chip ${tone === "overdue" ? "due-overdue" : tone === "soon" ? "due-soon" : ""}`}
+            data-due-chip={tone}
+            aria-label={`Edit due time for ${task.title}`}
+            onClick={() => begin("due")}
+          >
             {byTime}
-          </span>
+          </button>
         ) : null}
         {hasNotes ? <span className="notes-dot" aria-label="Has notes" /> : null}
         <button
@@ -160,30 +260,81 @@ function TaskCard({
           <ChevronDown aria-hidden="true" className="size-5" />
         </button>
       </div>
+      {draft ? (
+        <div
+          ref={editorRef}
+          className="flex flex-col gap-2"
+          data-inline-editor="task"
+          onBlur={onEditorBlur}
+          onKeyDown={onEditorKey}
+        >
+          <input
+            ref={titleRef}
+            aria-label={`Edit ${task.title}`}
+            className="field min-h-14 text-lg"
+            value={draft.title}
+            maxLength={200}
+            enterKeyHint="done"
+            onChange={(event) => setDraft((current) => (current ? { ...current, title: event.target.value } : current))}
+          />
+          <label className="flex flex-col gap-1 text-muted">
+            Due time
+            <input
+              ref={dueRef}
+              type="time"
+              className="field min-h-14"
+              aria-label={`Edit due time for ${task.title}`}
+              value={draft.due}
+              onChange={(event) => setDraft((current) => (current ? { ...current, due: event.target.value } : current))}
+            />
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="tap flex-1 rounded-card border border-line px-3"
+              onPointerDown={keepFocus}
+              onClick={() => {
+                saveDraft(false);
+                moveTaskByDir(list.id, task.id, -1);
+              }}
+            >
+              Up
+            </button>
+            <button
+              type="button"
+              className="tap flex-1 rounded-card border border-line px-3"
+              onPointerDown={keepFocus}
+              onClick={() => {
+                saveDraft(false);
+                moveTaskByDir(list.id, task.id, 1);
+              }}
+            >
+              Down
+            </button>
+            <button type="button" className="tap flex-1 rounded-card border border-line px-3" onPointerDown={keepFocus} onClick={cancelEdit}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
       {expanded ? (
         <div className="flex flex-col gap-3">
           <div className="flex items-start gap-2">
             <button
               type="button"
-              className="flex size-11 shrink-0 items-center justify-center rounded-card border border-line text-muted"
+              className="flex size-14 shrink-0 items-center justify-center rounded-card border border-line text-muted"
               aria-label={`Drag to reorder ${task.title}`}
               {...attributes}
               {...listeners}
             >
               <GripVertical aria-hidden="true" className="size-6" />
             </button>
-            <div className="flex min-w-0 flex-1 flex-col gap-2">
-              <input
-                aria-label="Task title"
-                value={task.title}
-                onChange={(event) => setTitle(list.id, task.id, event.target.value)}
-                className={`w-full border-b border-line bg-transparent py-1 outline-none ${task.done ? "text-ink line-through decoration-2" : "text-ink"}`}
-              />
-              <label className="flex flex-col gap-1 text-muted">
+            {draft ? null : (
+              <label className="flex min-w-0 flex-1 flex-col gap-1 text-muted">
                 Due time
                 <input
                   type="time"
-                  className="field"
+                  className="field min-h-14"
                   aria-label={`Due time for ${task.title}`}
                   value={clockFromIso(task.dueAt)}
                   onChange={(event) => {
@@ -198,48 +349,18 @@ function TaskCard({
                   }}
                 />
               </label>
-              {task.editing ? (
-                <>
-                  <label className="flex flex-col gap-2">
-                    Due
-                    <input
-                      type="datetime-local"
-                      className="field"
-                      value={toDatetimeLocal(task.dueAt)}
-                      onChange={(event) => setDueAt(list.id, task.id, fromDatetimeLocal(event.target.value))}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-2">
-                    Column
-                    <select
-                      className="field"
-                      value={task.columnId}
-                      onChange={(event) => setTaskColumn(list.id, task.id, event.target.value)}
-                    >
-                      {columnsOf(list).map((column) => (
-                        <option key={column.id} value={column.id}>
-                          {column.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </>
-              ) : null}
-            </div>
+            )}
           </div>
-          <div className="flex flex-wrap justify-end gap-2">
-            <button type="button" className="min-h-11 rounded-card border border-line px-3" onClick={() => moveTaskByDir(list.id, task.id, -1)}>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="tap flex-1 rounded-card border border-line px-3" onClick={() => moveTaskByDir(list.id, task.id, -1)}>
               Up
             </button>
-            <button type="button" className="min-h-11 rounded-card border border-line px-3" onClick={() => moveTaskByDir(list.id, task.id, 1)}>
+            <button type="button" className="tap flex-1 rounded-card border border-line px-3" onClick={() => moveTaskByDir(list.id, task.id, 1)}>
               Down
-            </button>
-            <button type="button" className="min-h-11 rounded-card border border-line px-3 text-muted" onClick={() => setEditing(list.id, task.id, true)}>
-              edit
             </button>
             <button
               type="button"
-              className="min-h-11 rounded-card border border-line px-3 text-muted"
+              className="tap rounded-card border border-line px-3 text-muted"
               onClick={() => {
                 if (!armed) {
                   setArmed(true);
@@ -252,7 +373,7 @@ function TaskCard({
             </button>
             <button
               type="button"
-              className="min-h-11 rounded-card border border-line px-3 text-muted"
+              className="tap rounded-card border border-line px-3 text-muted"
               onClick={() => {
                 saveNotes(list.id, task.id);
                 setMessage("Notes saved.");
@@ -438,9 +559,10 @@ export function ChecklistApp({
   return (
     <NowContext.Provider value={now}>
       <main data-screen="list" className="screen mx-auto flex w-full max-w-3xl flex-col gap-4">
-        <div className="flex items-center gap-2">
-          <ListSelect />
-          <div className="ml-auto flex shrink-0 gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <ListName list={list} />
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <ListSelect />
             <button type="button" aria-label="Voice command" className="flex size-11 items-center justify-center rounded-card border border-line bg-surface" onClick={() => void onVoice()}>
               <Mic aria-hidden="true" className="size-5" />
             </button>

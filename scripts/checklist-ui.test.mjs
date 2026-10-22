@@ -20,6 +20,9 @@ test("main screen is the checklist, the switcher, the mic, and the gear", () => 
   assert.equal(showListSwitcher(2), true);
   assert.match(list, /Check hydrant map/);
   assert.match(list, new RegExp(`data-task-id="${HYDRANT}"[^>]*data-expanded="false"`));
+  assert.match(list, /aria-label="Edit Check hydrant map"/);
+  assert.match(list, /aria-label="Rename Fire department"/);
+  assert.match(list, /aria-label="Edit due time for Check hydrant map"/);
   assert.match(list, /aria-label="Expand Check hydrant map"/);
   assert.match(list, /aria-label="Has notes"/);
   assert.match(list, /data-due-chip=/);

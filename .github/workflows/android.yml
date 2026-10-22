@@ -56,6 +56,7 @@ jobs:
         run: |
           npx cap add android
           npx cap sync android
+          node scripts/android-version.mjs
 
       - name: Build debug APK
         working-directory: android

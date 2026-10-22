@@ -155,20 +155,34 @@ const SAMPLE_LIST_IDS = new Set([
   "22222222-2222-4222-8222-222222222222",
   "33333333-3333-4333-8333-333333333333",
 ]);
-const ORIGINAL_TASK_IDS = new Set([
-  "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
-  "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
-  "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
-  "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
-  "cccccccc-cccc-4ccc-8ccc-ccccccccccc1",
+/** Titles, checks, and notes from the pre-1.4.1 sample. A due time was not part of it. */
+const ORIGINAL_TASKS = new Map<string, { title: string; done: boolean; notes: string }>([
+  ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", { title: "Saturday open until 5", done: false, notes: "" }],
+  ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2", { title: "Check tomorrow's bookings", done: true, notes: "" }],
+  ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1", { title: "Check hydrant map", done: false, notes: "" }],
+  ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2", { title: "Quincy Hill relay", done: true, notes: "" }],
+  ["cccccccc-cccc-4ccc-8ccc-ccccccccccc1", { title: "EMT skill sheets", done: false, notes: "" }],
 ]);
 
-/** The first shipped sample was five tasks. Replace only that, never a list someone has edited. */
+/**
+ * The first shipped sample was five tasks. Replace only that exact sample.
+ * A changed title, check, note, or due time means someone edited it.
+ */
 function isUntouchedSample(data: PersistedV2): boolean {
   const lists = data.lists.filter((list) => !list.deletedAt);
   if (lists.length !== 4 || !lists.every((list) => SAMPLE_LIST_IDS.has(list.id))) return false;
   const tasks = lists.flatMap((list) => list.tasks.filter((item) => !item.deletedAt));
-  return tasks.length === 5 && tasks.every((item) => ORIGINAL_TASK_IDS.has(item.id));
+  if (tasks.length !== ORIGINAL_TASKS.size) return false;
+  return tasks.every((item) => {
+    const original = ORIGINAL_TASKS.get(item.id);
+    return (
+      original !== undefined &&
+      item.title === original.title &&
+      item.done === original.done &&
+      item.notes.trim() === original.notes &&
+      !item.dueAt
+    );
+  });
 }
 
 /**

@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { RenameControl } from "@/components/checklist/rename-control";
 import { SettingsScreen } from "@/components/checklist/settings-screen";
 import { shareCommand, switchCommand } from "@/lib/checklist/commands";
 import { completion } from "@/lib/checklist/score";
@@ -41,21 +42,28 @@ function ListMenu() {
   const lists = visibleLists(state.lists);
   const active = lists.find((list) => list.id === state.activeId) ?? null;
   const [menuId, setMenuId] = useState<string | null>(null);
-  const [name, setName] = useState("");
   const [armed, setArmed] = useState(false);
   const menu = lists.find((list) => list.id === menuId) ?? null;
 
   function openMenu(list: List) {
     setMenuId(list.id);
-    setName(list.name);
     setArmed(false);
   }
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <img src="/favicon.svg" alt="" width={40} height={40} className="logo-mark" />
-        <h2 className="min-w-0 flex-1 truncate text-2xl">{active?.name ?? "Checklist"}</h2>
+        {active ? (
+          <RenameControl
+            value={active.name}
+            disabled={Boolean(active.system)}
+            className="list-name"
+            onCommit={(next) => renameList(active.id, next)}
+          />
+        ) : (
+          <h2 className="min-w-0 flex-1 truncate text-2xl">Checklist</h2>
+        )}
         <button
           type="button"
           aria-label="Add list"
@@ -71,7 +79,7 @@ function ListMenu() {
         {active ? (
           <button
             type="button"
-            aria-label={`Rename or delete ${active.name}`}
+            aria-label={`Reorder or delete ${active.name}`}
             className="min-h-14 min-w-14 shrink-0 rounded-card border border-line bg-canvas px-3"
             onClick={() => (menuId === active.id ? setMenuId(null) : openMenu(active))}
           >
@@ -82,31 +90,17 @@ function ListMenu() {
       {menu?.system ? (
         <p className="rounded-card border border-line bg-canvas p-3 text-muted">Daily fills each morning and can't be deleted.</p>
       ) : menu ? (
-        <form
-          className="flex flex-col gap-2 rounded-card border border-line bg-canvas p-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            renameList(menu.id, name);
-            setMenuId(null);
-          }}
-        >
-          <label className="flex flex-col gap-2">
-            List name
-            <input className="field" value={name} onChange={(event) => setName(event.target.value)} />
-          </label>
+        <div className="flex flex-col gap-2 rounded-card border border-line bg-canvas p-3">
           <div className="flex flex-wrap gap-2">
-            <button type="submit" className="min-h-11 rounded-card border border-line px-3">
-              Rename
-            </button>
-            <button type="button" className="min-h-11 rounded-card border border-line px-3" onClick={() => moveListByDir(menu.id, -1)}>
+            <button type="button" className="tap flex-1 rounded-card border border-line px-3" onClick={() => moveListByDir(menu.id, -1)}>
               Up
             </button>
-            <button type="button" className="min-h-11 rounded-card border border-line px-3" onClick={() => moveListByDir(menu.id, 1)}>
+            <button type="button" className="tap flex-1 rounded-card border border-line px-3" onClick={() => moveListByDir(menu.id, 1)}>
               Down
             </button>
             <button
               type="button"
-              className="min-h-11 rounded-card border border-line px-3 text-muted"
+              className="tap rounded-card border border-line px-3 text-muted"
               onClick={() => {
                 if (!armed) {
                   setArmed(true);
@@ -119,7 +113,7 @@ function ListMenu() {
               {armed ? "Tap again to delete" : "Delete"}
             </button>
           </div>
-        </form>
+        </div>
       ) : null}
     </div>
   );
