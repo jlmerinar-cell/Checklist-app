@@ -589,6 +589,50 @@ p.list-name {
   margin: 0;
 }
 
+.list-edit-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-width: 100%;
+}
+
+a.list-edit-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  min-height: 2.75rem;
+  padding: 0.15rem 0.65rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+a.list-edit-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 11rem;
+}
+
+.add-list-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+  max-width: 100%;
+}
+
+.add-list-form .field {
+  min-width: 0;
+}
+
 .list-switch {
   position: relative;
   width: 48px;

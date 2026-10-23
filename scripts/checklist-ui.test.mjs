@@ -7,7 +7,7 @@ const jiti = createJiti(import.meta.url, {
   tsconfigPaths: true,
 });
 
-const { renderScreens } = await jiti.import("../src/components/checklist/ui-render.tsx");
+const { renderScreens, renderListEdit } = await jiti.import("../src/components/checklist/ui-render.tsx");
 const { showListSwitcher } = await jiti.import("../src/lib/checklist/chrome.ts");
 const { foldAfterTap } = await jiti.import("../src/lib/checklist/task-fold.ts");
 const { handleVoiceTap } = await jiti.import("../src/lib/checklist/voice.ts");
@@ -52,7 +52,15 @@ test("main screen is the checklist, the switcher, the mic, and the gear", () => 
   assert.equal(list.includes("Theme editor"), false);
   assert.equal(list.includes("Diamond plate"), false);
   assert.equal(list.includes("Brushed metal"), false);
-  assert.equal(list.includes("Add list"), false);
+  assert.match(list, /Add list/);
+  assert.match(list, /aria-label="New list name"/);
+  assert.match(list, /aria-label="Edit lists"/);
+  assert.match(list, /aria-label="Edit list Fire department"/);
+  assert.match(list, /href="\/list\/22222222-2222-4222-8222-222222222222\/edit"/);
+  assert.match(list, /href="\/list\/11111111-1111-4111-8111-111111111111\/edit"/);
+  assert.match(list, /href="\/list\/33333333-3333-4333-8333-333333333333\/edit"/);
+  assert.equal(list.includes("/list/00000000-0000-4000-8000-0000000000da/edit"), false);
+  assert.equal((list.match(/data-edit-list="/g) || []).length, 3);
   assert.match(list, /progressbar/);
   assert.match(list, /New task/);
   assert.equal(list.includes("Shift calendar"), false);
@@ -124,6 +132,43 @@ test("the mic runs a mocked recognizer", async () => {
   assert.equal(await handleVoiceTap(async () => null), "Didn't catch that.");
   assert.match(await handleVoiceTap(async () => "add turnout coat"), /Added turnout coat/);
   assert.match(await handleVoiceTap(async () => "check off turnout"), /Checked off turnout coat/);
+});
+
+test("each list edit page is only that list, including delete and theme", () => {
+  const fire = "22222222-2222-4222-8222-222222222222";
+  const personal = "33333333-3333-4333-8333-333333333333";
+  const daily = "00000000-0000-4000-8000-0000000000da";
+  const firePage = renderListEdit(fire);
+  assert.match(firePage, /data-screen="list-edit"/);
+  assert.match(firePage, new RegExp(`data-list-id="${fire}"`));
+  assert.match(firePage, /Check hydrant map/);
+  assert.equal(firePage.includes("Saturday open until 5"), false);
+  assert.equal(firePage.includes("EMT patient assessment"), false);
+  assert.match(firePage, /aria-label="Rename Fire department"/);
+  assert.match(firePage, /id="add-task"/);
+  assert.match(firePage, /Delete list/);
+  assert.match(firePage, /Theme for Fire department/);
+  assert.match(firePage, /Preset themes for Fire department/);
+  assert.match(firePage, /Pink/);
+  assert.match(firePage, /Use app default/);
+  assert.match(firePage, /href="\/"/);
+  assert.equal(firePage.includes('aria-label="Theme target"'), false);
+  assert.equal(firePage.includes('href="/settings"'), false);
+
+  const personalPage = renderListEdit(personal);
+  assert.match(personalPage, /EMT patient assessment/);
+  assert.equal(personalPage.includes("Check hydrant map"), false);
+  assert.match(personalPage, /Theme for Personal/);
+  assert.notEqual(firePage, personalPage);
+
+  const dailyPage = renderListEdit(daily);
+  assert.match(dailyPage, /can(?:'|&#x27;)t be deleted/);
+  assert.equal(dailyPage.includes("Delete list"), false);
+  assert.equal(dailyPage.includes("Delete this list"), false);
+
+  const missing = renderListEdit("missing-list");
+  assert.match(missing, /That list isn(?:'|&#x27;)t here/);
+  assert.match(missing, /href="\/"/);
 });
 
 test("settings keeps app controls off the task card", () => {

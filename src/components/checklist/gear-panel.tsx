@@ -125,7 +125,7 @@ function ListMenu() {
   );
 }
 
-function FireShiftPanel({ list }: { list: List }) {
+export function FireShiftPanel({ list }: { list: List }) {
   const state = useChecklist();
   const [confirming, setConfirming] = useState(false);
   const [result, setResult] = useState("");
@@ -190,7 +190,7 @@ function FireShiftPanel({ list }: { list: List }) {
   );
 }
 
-function ColumnTools({ list }: { list: List }) {
+export function ColumnTools({ list }: { list: List }) {
   const [columnName, setColumnName] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const columns = columnsOf(list);
@@ -291,7 +291,7 @@ function AddTask({ list }: { list: List }) {
   );
 }
 
-function ShareList({ list }: { list: List }) {
+export function ShareList({ list }: { list: List }) {
   const [link, setLink] = useState("");
   useEffect(() => {
     if (!list.shared) {
